@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign In — DerbySystem</title>
+  <link rel="stylesheet" href="/frontend/styles.css" />
+  <script src="/frontend/config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="/frontend/lib/router.js"></script>
+  <script src="/frontend/lib/api.js"></script>
+  <script src="/frontend/lib/auth.js"></script>
+</head>
+<body>
+
+<div style="min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;">
+  <div style="width:100%; max-width:400px;">
+
+    <div style="text-align:center; margin-bottom:32px;">
+      <div style="font-size:3rem; margin-bottom:12px;">🏁</div>
+      <h1 style="font-size:1.8rem; margin-bottom:6px;">DerbySystem</h1>
+      <p>Race organiser sign-in</p>
+    </div>
+
+    <!-- Step 1: enter email -->
+    <div class="card" id="emailCard">
+      <div class="card-title">Scoutmaster Sign In</div>
+      <p style="margin-bottom:20px; font-size:0.88rem;">
+        We'll email you a one-click magic link — no password needed.
+      </p>
+      <label for="emailInput">Email address</label>
+      <input type="email" id="emailInput" placeholder="you@example.com"
+             autocomplete="email" inputmode="email"
+             onkeydown="if(event.key==='Enter') sendLink()" />
+      <p id="emailErr" style="color:var(--danger); font-size:0.82rem; min-height:1.2em; margin-top:-8px; margin-bottom:12px;"></p>
+      <button class="btn btn-primary btn-lg btn-full" id="sendBtn" onclick="sendLink()">
+        Send Magic Link →
+      </button>
+      <p style="font-size:0.78rem; color:var(--muted2); margin-top:16px; text-align:center;">
+        First time? An account is created automatically.<br>
+        <a href="/">Learn about DerbySystem</a>
+      </p>
+    </div>
+
+    <!-- Step 2: check email -->
+    <div class="card" id="sentCard" style="display:none; text-align:center;">
+      <div style="font-size:2.5rem; margin-bottom:12px;">📬</div>
+      <h2 style="margin-bottom:8px;">Check your email</h2>
+      <p id="sentMsg" style="margin-bottom:20px;">We sent a sign-in link.</p>
+      <button class="btn btn-ghost btn-full" onclick="resetForm()">Use a different email</button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // Already signed in? Redirect immediately.
+  (async () => {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) { redirect(); }
+  })();
+
+  function redirect() {
+    const params = new URLSearchParams(location.search);
+    const next = params.get("next");
+    // Only redirect to safe same-origin URLs
+    if (next && next.startsWith(location.origin)) {
+      location.href = next;
+    } else {
+      location.href = "/dashboard/";
+    }
+  }
+
+  // Handle magic-link token in URL hash after email click
+  sb.auth.onAuthStateChange((event, session) => {
+    if (event === "SIGNED_IN" && session) redirect();
+  });
+
+  async function sendLink() {
+    const email = document.getElementById("emailInput").value.trim();
+    if (!email || !email.includes("@")) {
+      document.getElementById("emailErr").textContent = "Enter a valid email address";
+      return;
+    }
+    document.getElementById("emailErr").textContent = "";
+    const btn = document.getElementById("sendBtn");
+    btn.disabled = true;
+    btn.textContent = "Sending…";
+
+    const { error } = await sendMagicLink(email);
+    if (error) {
+      document.getElementById("emailErr").textContent = error.message;
+      btn.disabled = false;
+      btn.textContent = "Send Magic Link →";
+      return;
+    }
+
+    document.getElementById("emailCard").style.display = "none";
+    document.getElementById("sentCard").style.display = "block";
+    document.getElementById("sentMsg").textContent =
+      `We sent a sign-in link to ${email}. Click it to continue.`;
+  }
+
+  function resetForm() {
+    document.getElementById("emailCard").style.display = "block";
+    document.getElementById("sentCard").style.display = "none";
+    document.getElementById("emailInput").value = "";
+    const btn = document.getElementById("sendBtn");
+    btn.disabled = false;
+    btn.textContent = "Send Magic Link →";
+  }
+</script>
+
+</body>
+</html>

@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Race Officials — DerbySystem</title>
+  <link rel="stylesheet" href="/frontend/styles.css" />
+  <script src="/frontend/config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="/frontend/lib/router.js"></script>
+  <script src="/frontend/lib/api.js"></script>
+  <script src="/frontend/lib/admin.js"></script>
+</head>
+<body>
+
+<div id="pinGate" style="position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;align-items:center;justify-content:center;">
+  <div style="text-align:center;max-width:300px;padding:20px;">
+    <h2 style="margin-bottom:8px;">Admin Access</h2>
+    <p style="margin-bottom:16px;">Enter the 4-digit PIN</p>
+    <input type="tel" id="pinInput" maxlength="4" placeholder="••••" autocomplete="off"
+           style="text-align:center;font-size:2rem;letter-spacing:12px;width:160px;margin:0 auto 16px;display:block;" />
+    <p id="pinErr" style="color:var(--danger);font-size:0.82rem;min-height:1.4em;"></p>
+  </div>
+</div>
+
+<nav class="top-nav">
+  <span class="brand" id="navBrand">Derby</span>
+  <span id="navLinks"></span>
+</nav>
+
+<div class="container">
+
+  <!-- ── Current Heat ──────────────────────────────────────── -->
+  <div class="card" id="heatInfoCard" style="margin-top:20px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+      <div>
+        <div style="font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:1px;">Current Heat</div>
+        <h2 id="heatLabel" style="color:var(--accent2);">Loading…</h2>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-ghost-danger btn-lg" onclick="openRerace()">⚠ Re-race</button>
+        <button class="btn btn-primary btn-lg" id="nextHeatBtn" onclick="advanceHeat()">▶ Next Heat</button>
+      </div>
+    </div>
+
+    <!-- Input mode toggle -->
+    <div class="seg-ctrl" id="modeToggle" style="display:none;">
+      <button class="seg-btn active" id="modeQuick" onclick="setMode('quick')">⚡ Quick Tap</button>
+      <button class="seg-btn"        id="modeDrop"  onclick="setMode('drop')">📋 Dropdown</button>
+    </div>
+
+    <!-- Quick tap -->
+    <div id="quickSection" style="display:none;">
+      <p style="margin-bottom:10px; font-size:0.85rem;">Tap cars in finish order (1st → last).</p>
+      <div id="quickTap" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;"></div>
+      <button class="btn btn-ghost btn-sm" onclick="resetQuickTap()">Reset</button>
+    </div>
+
+    <!-- Dropdown -->
+    <div id="dropSection" style="display:none;">
+      <div class="finish-grid" id="finishGrid"></div>
+    </div>
+
+    <!-- Submit -->
+    <div id="submitWrap" style="display:none; margin-top:12px;">
+      <button class="btn btn-gold btn-lg btn-full" id="submitBtn" onclick="submitResults()">Submit Results</button>
+    </div>
+
+    <!-- Already entered -->
+    <div id="existingCard" style="display:none; margin-top:12px;">
+      <div id="existingBody"></div>
+      <button class="btn btn-ghost-danger btn-sm" style="margin-top:10px;" onclick="clearResults()">⚠ Re-enter Results</button>
+    </div>
+
+    <div id="noHeatMsg" style="display:none;">
+      <div class="empty-state">No active heat — start a round from the Hub first.</div>
+    </div>
+  </div>
+
+  <!-- ── Standings ─────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-title">Current Round Standings</div>
+    <div id="standings"><span class="spinner"></span></div>
+  </div>
+
+</div>
+
+<!-- Re-race confirm -->
+<div class="confirm-overlay" id="reraceOverlay">
+  <div class="confirm-box" style="max-width:380px; width:100%; text-align:center;">
+    <div style="font-size:2.2rem; font-weight:900; color:var(--danger); letter-spacing:2px; margin-bottom:8px;">⚠ RE-RACE</div>
+    <div id="reraceLabel" style="font-size:1.4rem; font-weight:800; margin-bottom:12px;"></div>
+    <p style="font-size:0.9rem; color:var(--muted2); margin-bottom:20px;">All entered results will be cleared and the heat reset for re-running.</p>
+    <div class="confirm-btns">
+      <button class="btn btn-ghost btn-full" onclick="closeRerace()">Cancel</button>
+      <button class="btn btn-danger btn-full" onclick="confirmRerace()">⚠ Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  let ctx, event, eventId;
+  let currentHeatId   = null;
+  let currentRoundId  = null;
+  let heatLabel       = "";
+  let heatEntries     = [];   // [{lane_number, car_id, car_number, kid_name}]
+  let quickTapOrder   = [];
+  let currentMode     = "quick";
+
+  (async () => {
+    ({ ctx, event, eventId } = await adminBoot());
+    document.title = `Officials — ${event.name}`;
+    document.getElementById("navBrand").textContent = "🏁 " + (event.track_name || "Derby");
+    document.getElementById("navLinks").innerHTML   = buildAdminNav(ctx, "results");
+
+    await loadPage();
+    subscribeTable(eventId, "race_state",   loadPage);
+    subscribeTable(eventId, "heat_results", loadPage);
+    subscribeTable(eventId, "rounds",       loadStandings);
+  })();
+
+  function setMode(mode) {
+    currentMode = mode;
+    document.getElementById("modeQuick").classList.toggle("active", mode === "quick");
+    document.getElementById("modeDrop").classList.toggle("active", mode === "drop");
+    document.getElementById("quickSection").style.display = mode === "quick" ? "block" : "none";
+    document.getElementById("dropSection").style.display  = mode === "drop"  ? "block" : "none";
+    if (mode === "quick") resetQuickTap();
+    else buildDropdown();
+  }
+
+  async function loadPage() {
+    const { data: state } = await sb
+      .from("race_state")
+      .select("current_heat_id, current_round_id, heats(heat_number, status, rounds(round_number))")
+      .eq("event_id", eventId)
+      .single();
+
+    currentRoundId = state?.current_round_id ?? null;
+    currentHeatId  = state?.current_heat_id  ?? null;
+    const heat   = state?.heats;
+    const round  = heat?.rounds;
+
+    const hide = (id) => document.getElementById(id).style.display = "none";
+    const show = (id, d="block") => document.getElementById(id).style.display = d;
+
+    if (!currentHeatId) {
+      document.getElementById("heatLabel").textContent = "No active heat";
+      ["modeToggle","quickSection","dropSection","submitWrap","existingCard"].forEach(hide);
+      show("noHeatMsg");
+      await loadStandings();
+      return;
+    }
+
+    heatLabel = `Round ${round?.round_number ?? "?"} — Heat ${heat?.heat_number ?? "?"}`;
+    document.getElementById("heatLabel").textContent = heatLabel;
+    hide("noHeatMsg");
+
+    // Load entries
+    const { data: entries } = await sb
+      .from("heat_entries")
+      .select("lane_number, car_id, cars(car_number, kid_name)")
+      .eq("heat_id", currentHeatId)
+      .order("lane_number");
+
+    heatEntries = (entries || []).map(e => ({
+      lane_number: e.lane_number,
+      car_id: e.car_id,
+      car_number: e.cars?.car_number,
+      kid_name:   e.cars?.kid_name,
+    }));
+
+    // Check for existing result
+    const { data: existing } = await sb
+      .from("heat_results")
+      .select("*")
+      .eq("heat_id", currentHeatId)
+      .maybeSingle();
+
+    if (existing) {
+      hide("modeToggle"); hide("quickSection"); hide("dropSection"); hide("submitWrap");
+      show("existingCard");
+
+      // Build result display
+      const carIds = [existing.first_place_car, existing.second_place_car, existing.third_place_car, existing.fourth_place_car].filter(Boolean);
+      const { data: fc } = await sb.from("cars").select("id, car_number, kid_name").in("id", carIds);
+      const finishMap = {};
+      (fc || []).forEach(c => finishMap[c.id] = c);
+      const medals = ["🥇","🥈","🥉","4️⃣"];
+      const fmt = [existing.first_place_car, existing.second_place_car, existing.third_place_car, existing.fourth_place_car]
+        .filter(Boolean)
+        .map((id, i) => {
+          const c = finishMap[id];
+          return c ? `<span style="display:block; font-weight:700;">${medals[i]} #${c.car_number} ${c.kid_name}</span>` : "";
+        }).join("");
+      document.getElementById("existingBody").innerHTML =
+        `<div style="font-size:0.8rem; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--muted); margin-bottom:8px;">Results entered</div>${fmt}`;
+    } else {
+      hide("existingCard");
+      show("modeToggle");
+      resetQuickTap();
+      setMode(currentMode);
+      show("submitWrap");
+    }
+
+    await loadStandings();
+  }
+
+  // ── Quick tap ────────────────────────────────────────────────
+  function resetQuickTap() {
+    quickTapOrder = [];
+    renderQuickTap();
+  }
+
+  function renderQuickTap() {
+    const tap = document.getElementById("quickTap");
+    if (!tap) return;
+    tap.innerHTML = heatEntries.map(e => {
+      const pos = quickTapOrder.indexOf(e.car_id);
+      const medals = ["🥇","🥈","🥉","4️⃣"];
+      const active = pos >= 0;
+      return `
+        <button class="btn ${active ? "btn-gold" : "btn-ghost"}" style="flex-direction:column; min-height:68px; flex:1; min-width:60px;"
+                onclick="tapCar('${e.car_id}')">
+          ${active ? `<span style="font-size:1.2rem;">${medals[pos]}</span>` : ""}
+          <span style="font-size:1.5rem; font-weight:900; color:${active ? "#fff" : "var(--accent)"};">${e.car_number}</span>
+          <span style="font-size:0.7rem; font-weight:600; color:${active ? "rgba(255,255,255,.8)" : "var(--muted)"}; line-height:1;">${e.kid_name?.split(" ")[0] ?? ""}</span>
+        </button>`;
+    }).join("");
+
+    const numCars = heatEntries.length;
+    document.getElementById("submitBtn").disabled = quickTapOrder.length < numCars;
+    if (quickTapOrder.length === numCars) {
+      document.getElementById("submitWrap").style.display = "block";
+    }
+  }
+
+  function tapCar(carId) {
+    const pos = quickTapOrder.indexOf(carId);
+    if (pos >= 0) {
+      quickTapOrder.splice(pos, 1); // toggle off
+    } else {
+      quickTapOrder.push(carId);
+    }
+    renderQuickTap();
+  }
+
+  // ── Dropdown ─────────────────────────────────────────────────
+  function buildDropdown() {
+    const numL = event.num_lanes || 4;
+    const grid = document.getElementById("finishGrid");
+    const places = ["1st Place", "2nd Place", "3rd Place", "4th Place", "5th", "6th", "7th", "8th"].slice(0, heatEntries.length);
+    grid.innerHTML = places.map((place, i) => {
+      const opts = heatEntries.map(e =>
+        `<option value="${e.car_id}">#${e.car_number} ${e.kid_name}</option>`).join("");
+      return `
+        <div class="finish-lane">
+          <div class="finish-lane lane-heading">${place}</div>
+          <select id="place${i + 1}">${opts}</select>
+        </div>`;
+    }).join("");
+  }
+
+  // ── Submit ───────────────────────────────────────────────────
+  async function submitResults() {
+    let order;
+    if (currentMode === "quick") {
+      order = quickTapOrder;
+    } else {
+      order = [1,2,3,4].map(i => {
+        const sel = document.getElementById(`place${i}`);
+        return sel ? sel.value : null;
+      }).filter(Boolean);
+    }
+
+    if (order.length < 1) { toast("Enter at least 1 result", false); return; }
+
+    const btn = document.getElementById("submitBtn");
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+
+    const { error } = await sb.from("heat_results").insert({
+      event_id:          eventId,
+      heat_id:           currentHeatId,
+      first_place_car:   order[0] || order[0],
+      second_place_car:  order[1] || order[0],
+      third_place_car:   order[2] || order[0],
+      fourth_place_car:  order[3] || order[0],
+    });
+
+    btn.disabled = false;
+    btn.textContent = "Submit Results";
+
+    if (error) { toast(error.message, false); return; }
+    toast("Results saved!");
+    await loadPage();
+  }
+
+  async function clearResults() {
+    if (!currentHeatId) return;
+    await sb.from("heat_results").delete().eq("heat_id", currentHeatId);
+    await loadPage();
+  }
+
+  // ── Advance heat ─────────────────────────────────────────────
+  async function advanceHeat() {
+    if (!currentHeatId) { toast("No active heat", false); return; }
+
+    // Mark current heat completed
+    await sb.from("heats").update({ status: "completed" }).eq("id", currentHeatId);
+
+    // Find next pending heat in round
+    const { data: next } = await sb
+      .from("heats")
+      .select("id, heat_number")
+      .eq("round_id", currentRoundId)
+      .eq("status", "pending")
+      .order("heat_number")
+      .limit(1)
+      .maybeSingle();
+
+    if (next) {
+      await sb.from("heats").update({ status: "active" }).eq("id", next.id);
+      await sb.from("race_state")
+        .update({ current_heat_id: next.id, updated_at: new Date().toISOString() })
+        .eq("event_id", eventId);
+      toast(`Heat ${next.heat_number} started`);
+    } else {
+      // All heats done in round
+      await sb.from("race_state")
+        .update({ current_heat_id: null, updated_at: new Date().toISOString() })
+        .eq("event_id", eventId);
+      toast("All heats complete — close round from Hub");
+    }
+    await loadPage();
+  }
+
+  // ── Re-race ──────────────────────────────────────────────────
+  function openRerace() {
+    if (!currentHeatId) { toast("No active heat", false); return; }
+    document.getElementById("reraceLabel").textContent = heatLabel;
+    document.getElementById("reraceOverlay").classList.add("open");
+  }
+
+  function closeRerace() {
+    document.getElementById("reraceOverlay").classList.remove("open");
+  }
+
+  async function confirmRerace() {
+    if (!currentHeatId) return;
+    await sb.from("heat_results").delete().eq("heat_id", currentHeatId);
+    await sb.from("heats").update({ status: "active" }).eq("id", currentHeatId);
+    closeRerace();
+    toast("Heat reset — ready to re-run");
+    await loadPage();
+  }
+
+  // ── Standings ────────────────────────────────────────────────
+  async function loadStandings() {
+    const { data, error } = await sb
+      .from("round_standings")
+      .select("*")
+      .eq("event_id", eventId)
+      .order("standing");
+
+    const el = document.getElementById("standings");
+    if (!data?.length) { el.innerHTML = `<div class="empty-state">No results yet</div>`; return; }
+
+    const medals = ["🥇","🥈","🥉"];
+    el.innerHTML = data.map(row => `
+      <div class="leaderboard-row rank-${row.standing}">
+        <div class="rank">${medals[row.standing - 1] || row.standing}</div>
+        <div class="car-num">#${row.car_number}</div>
+        <div class="name">${row.kid_name}</div>
+        <div class="pts">${row.total_points} pts · ${row.heats_completed} heats</div>
+      </div>`).join("");
+  }
+</script>
+
+</body>
+</html>

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live Results — DerbySystem</title>
+  <meta name="description" content="Live Pinewood Derby race results" />
+  <link rel="stylesheet" href="/frontend/styles.css" />
+  <script src="/frontend/config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="/frontend/lib/router.js"></script>
+  <script src="/frontend/lib/api.js"></script>
+</head>
+<body>
+
+<nav class="top-nav">
+  <span class="brand" id="navBrand">🏁 Derby</span>
+  <span id="eventName" style="font-size:0.82rem; color:var(--muted); margin-left:4px;"></span>
+  <a href="/" style="margin-left:auto; font-size:0.8rem; color:var(--muted2);">DerbySystem</a>
+</nav>
+
+<div class="container" style="padding-top:20px;">
+
+  <!-- Current heat banner -->
+  <div class="card" id="heatBanner" style="display:none; background:linear-gradient(135deg,#1e3a5f,#2563eb); border:none; color:#fff; text-align:center; padding:18px;">
+    <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:1.2px; color:rgba(255,255,255,.7); margin-bottom:4px;">Now Running</div>
+    <div id="heatBannerText" style="font-size:1.3rem; font-weight:800; color:#fff;"></div>
+  </div>
+
+  <!-- Lane board (current heat) -->
+  <div id="laneSection" style="display:none;">
+    <div class="card-title" style="margin-bottom:8px; padding:0;">On Track</div>
+    <div class="lane-board" id="laneBoard"></div>
+  </div>
+
+  <!-- Leaderboard -->
+  <div class="card">
+    <div class="card-title">Leaderboard</div>
+    <div id="leaderboard"><span class="spinner"></span></div>
+  </div>
+
+  <!-- All heats / history -->
+  <div class="card">
+    <div class="card-title">Results</div>
+    <div id="heatHistory"><span class="spinner"></span></div>
+  </div>
+
+</div>
+
+<script>
+  let eventId    = null;
+  let numLanes   = 4;
+  let eventCache = null;
+
+  // ── Boot ────────────────────────────────────────────────────
+  (async () => {
+    let ctx, event;
+    try { ({ ctx, event, eventId } = await initPage()); }
+    catch { return; } // die() already showed error
+
+    eventCache = event;
+    numLanes = event.num_lanes || 4;
+
+    document.title = `${event.name} — Live Results`;
+    document.getElementById("eventName").textContent = event.name;
+    document.getElementById("navBrand").textContent  = "🏁 " + (event.track_name || "Derby");
+
+    await Promise.all([loadLeaderboard(), loadCurrentHeat(), loadHistory()]);
+    subscribeAll();
+  })();
+
+  // ── Leaderboard ──────────────────────────────────────────────
+  async function loadLeaderboard() {
+    const { data, error } = await sb
+      .from("round_standings")
+      .select("*")
+      .eq("event_id", eventId)
+      .order("standing");
+
+    const el = document.getElementById("leaderboard");
+    if (!data?.length) {
+      el.innerHTML = `<div class="empty-state">No results yet — race in progress!</div>`;
+      return;
+    }
+
+    const medals = ["🥇", "🥈", "🥉"];
+    el.innerHTML = data.map((row, i) => `
+      <div class="leaderboard-row rank-${row.standing}">
+        <div class="rank">${medals[row.standing - 1] || row.standing}</div>
+        <div class="car-num">#${row.car_number}</div>
+        <div class="name">${row.kid_name}</div>
+        <div class="pts">${row.total_points} pts</div>
+      </div>`).join("");
+  }
+
+  // ── Current heat ─────────────────────────────────────────────
+  async function loadCurrentHeat() {
+    const { data: state } = await sb
+      .from("race_state")
+      .select("current_heat_id, heats(heat_number, status, rounds(round_number))")
+      .eq("event_id", eventId)
+      .single();
+
+    const heatId = state?.current_heat_id;
+    const heat   = state?.heats;
+
+    if (!heatId || !heat || heat.status !== "active") {
+      document.getElementById("heatBanner").style.display = "none";
+      document.getElementById("laneSection").style.display = "none";
+      return;
+    }
+
+    const rn = heat.rounds?.round_number ?? "?";
+    const hn = heat.heat_number ?? "?";
+
+    document.getElementById("heatBanner").style.display = "block";
+    document.getElementById("heatBannerText").textContent = `Round ${rn} — Heat ${hn}`;
+
+    // Lane assignments
+    const { data: entries } = await sb
+      .from("heat_entries")
+      .select("lane_number, cars(car_number, kid_name)")
+      .eq("heat_id", heatId)
+      .order("lane_number");
+
+    const lanes = {};
+    (entries || []).forEach(e => lanes[e.lane_number] = e.cars);
+
+    document.getElementById("laneSection").style.display = "block";
+    document.getElementById("laneBoard").innerHTML =
+      Array.from({ length: numLanes }, (_, i) => i + 1).map(l => {
+        const car = lanes[l];
+        return `
+          <div class="lane-card">
+            <div class="lane-label">Lane ${l}</div>
+            <div class="car-number">${car ? car.car_number : "—"}</div>
+            <div class="kid-name">${car ? car.kid_name : ""}</div>
+          </div>`;
+      }).join("");
+  }
+
+  // ── Heat history ─────────────────────────────────────────────
+  async function loadHistory() {
+    const { data: rounds } = await sb
+      .from("rounds")
+      .select("id, round_number, status")
+      .eq("event_id", eventId)
+      .order("round_number");
+
+    const el = document.getElementById("heatHistory");
+    if (!rounds?.length) {
+      el.innerHTML = `<div class="empty-state">No heats yet</div>`;
+      return;
+    }
+
+    let html = "";
+    for (const round of rounds) {
+      const { data: heats } = await sb
+        .from("heats")
+        .select(`id, heat_number, status,
+          heat_results(first_place_car, second_place_car, third_place_car, fourth_place_car),
+          heat_entries(lane_number, cars(car_number, kid_name))`)
+        .eq("round_id", round.id)
+        .order("heat_number");
+
+      html += `<div class="result-heat-header">Round ${round.round_number}</div>`;
+
+      for (const heat of (heats || [])) {
+        const result = heat.heat_results?.[0];
+        if (!result) {
+          heat.heat_entries?.length
+            ? html += `<div class="leaderboard-row"><div class="rank">—</div><div class="name">Heat ${heat.heat_number} — pending</div></div>`
+            : "";
+          continue;
+        }
+
+        // Build finish order
+        const carMap = {};
+        (heat.heat_entries || []).forEach(e => {
+          if (e.cars) carMap[e.cars.car_number] = e.cars.kid_name;
+        });
+
+        // Fetch car numbers for result IDs
+        const carIds = [result.first_place_car, result.second_place_car, result.third_place_car, result.fourth_place_car].filter(Boolean);
+        const { data: finishCars } = await sb
+          .from("cars")
+          .select("id, car_number, kid_name")
+          .in("id", carIds);
+
+        const finishMap = {};
+        (finishCars || []).forEach(c => finishMap[c.id] = c);
+
+        const order = [result.first_place_car, result.second_place_car, result.third_place_car, result.fourth_place_car]
+          .filter(Boolean)
+          .map((id, i) => {
+            const c = finishMap[id];
+            return c ? `<span style="margin-right:10px;">${["🥇","🥈","🥉","4️⃣"][i]} #${c.car_number} ${c.kid_name}</span>` : "";
+          }).join("");
+
+        html += `
+          <div style="padding:10px 0; border-bottom:1px solid var(--border); font-size:0.88rem;">
+            <div style="font-weight:700; color:var(--muted); margin-bottom:4px; font-size:0.72rem; text-transform:uppercase;">Heat ${heat.heat_number}</div>
+            <div style="display:flex; flex-wrap:wrap; gap:4px;">${order}</div>
+          </div>`;
+      }
+    }
+
+    el.innerHTML = html || `<div class="empty-state">No completed heats yet</div>`;
+  }
+
+  // ── Live subscriptions ───────────────────────────────────────
+  function subscribeAll() {
+    // Re-render on any race data change
+    ["heat_results", "race_state", "round_standings"].forEach(table => {
+      subscribeTable(eventId, table, async () => {
+        await Promise.all([loadLeaderboard(), loadCurrentHeat(), loadHistory()]);
+      });
+    });
+  }
+</script>
+
+</body>
+</html>

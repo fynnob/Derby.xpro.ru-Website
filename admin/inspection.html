@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Inspection — DerbySystem</title>
+  <link rel="stylesheet" href="/frontend/styles.css" />
+  <style>
+    body { background: #000; overflow: hidden; }
+    .kiosk-root { position: fixed; inset: 0; display: flex; flex-direction: column; }
+    .scan-area  { flex: 1; position: relative; overflow: hidden; }
+    #reader { width: 100%; height: 100%; }
+    #reader video { width: 100% !important; height: 100% !important; object-fit: cover !important; }
+
+    .tally-pill {
+      position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,.75); backdrop-filter: blur(8px);
+      color: #fff; padding: 6px 18px; border-radius: 100px;
+      font-size: 0.78rem; font-weight: 700; display: flex; gap: 14px; z-index: 50;
+    }
+    .tally-pill .t-g { color: #4ade80; }
+    .tally-pill .t-r { color: #f87171; }
+    .tally-pill .t-y { color: #fbbf24; }
+
+    .nav-pill {
+      position: fixed; bottom: 14px; right: 14px;
+      background: rgba(0,0,0,.7); backdrop-filter: blur(8px);
+      color: #fff; padding: 10px 18px; border-radius: 100px;
+      font-size: 0.82rem; font-weight: 700; z-index: 50;
+      text-decoration: none; letter-spacing: 0.5px;
+    }
+
+    .family-overlay { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:200; display:none; align-items:flex-end; justify-content:center; }
+    .family-overlay.open { display:flex; }
+    .family-sheet { background:var(--surface); border-radius:20px 20px 0 0; width:100%; max-width:640px; max-height:80vh; overflow-y:auto; padding:20px 20px 32px; color:var(--text); }
+    .sheet-handle { width:40px; height:4px; background:var(--border2); border-radius:4px; margin:0 auto 16px; }
+
+    .fam-car { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 0; border-bottom:1px solid var(--border); }
+    .fam-car:last-child { border-bottom:none; }
+    .fam-num  { font-size:1.4rem; font-weight:900; color:var(--accent); }
+    .fam-name { font-size:1rem; font-weight:600; }
+    .fam-actions { display:flex; gap:8px; flex-shrink:0; }
+  </style>
+  <script src="/frontend/config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="/frontend/lib/router.js"></script>
+  <script src="/frontend/lib/api.js"></script>
+  <script src="/frontend/lib/admin.js"></script>
+</head>
+<body>
+
+<div id="pinGate" style="position:fixed;inset:0;z-index:9999;background:#000;display:flex;align-items:center;justify-content:center;">
+  <div style="text-align:center;max-width:300px;padding:20px;color:#fff;">
+    <h2 style="margin-bottom:8px;">Admin Access</h2>
+    <p style="margin-bottom:16px; color:#9ca3af;">Enter the 4-digit PIN</p>
+    <input type="tel" id="pinInput" maxlength="4" placeholder="••••" autocomplete="off"
+           style="text-align:center;font-size:2rem;letter-spacing:12px;width:160px;margin:0 auto 16px;display:block;background:#1a1e2e;border:1px solid #333;color:#fff;border-radius:10px;padding:12px;" />
+    <p id="pinErr" style="color:#f87171;font-size:0.82rem;min-height:1.4em;"></p>
+  </div>
+</div>
+
+<div class="kiosk-root">
+  <!-- Floating tally -->
+  <div class="tally-pill">
+    <span><span class="t-g" id="tallyLegal">0</span> Legal</span>
+    <span><span class="t-r" id="tallyIllegal">0</span> Not Legal</span>
+    <span><span class="t-y" id="tallyPending">0</span> Pending</span>
+  </div>
+
+  <!-- Camera -->
+  <div class="scan-area"><div id="reader"></div></div>
+
+  <!-- Manual token entry -->
+  <div style="position:fixed;bottom:14px;left:14px;z-index:50;display:flex;gap:8px;">
+    <input type="text" id="tokenInput" placeholder="Device token…"
+           style="width:160px;margin:0;padding:8px 12px;font-size:0.82rem;border-radius:100px;background:rgba(0,0,0,.7);border:1px solid #444;color:#fff;backdrop-filter:blur(8px);" />
+    <button onclick="manualLookup()" style="background:rgba(0,0,0,.7);backdrop-filter:blur(8px);color:#fff;border:1px solid #444;border-radius:100px;padding:8px 14px;font-size:0.82rem;font-weight:700;cursor:pointer;">Go</button>
+  </div>
+
+  <!-- Nav back -->
+  <a id="navHub" href="#" class="nav-pill">← Hub</a>
+</div>
+
+<!-- Family overlay -->
+<div class="family-overlay" id="familyOverlay" onclick="dismissFamily()">
+  <div class="family-sheet" id="familySheet" onclick="event.stopPropagation()">
+    <div class="sheet-handle"></div>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+      <div style="font-weight:800; font-size:1.1rem;" id="familyTitle">Family Cars</div>
+      <button class="btn btn-ghost btn-sm" onclick="dismissFamily()">Done ✕</button>
+    </div>
+    <div id="carList"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+  let ctx, event, eventId;
+  let lastToken  = null;
+  let lastScanAt = 0;
+  const DEBOUNCE = 3000;
+
+  (async () => {
+    ({ ctx, event, eventId } = await adminBoot());
+
+    // Fix nav link
+    document.getElementById("navHub").href = `/admin/#/${ctx.org}/${ctx.name}`;
+
+    await loadTally();
+    startScanner();
+    subscribeTable(eventId, "cars", loadTally);
+  })();
+
+  async function loadTally() {
+    const { data } = await sb.from("cars").select("legal_status").eq("event_id", eventId);
+    const legal   = data?.filter(c => c.legal_status === "legal").length ?? 0;
+    const illegal = data?.filter(c => c.legal_status === "not_legal").length ?? 0;
+    const pending = data?.filter(c => c.legal_status === "pending").length ?? 0;
+    document.getElementById("tallyLegal").textContent   = legal;
+    document.getElementById("tallyIllegal").textContent = illegal;
+    document.getElementById("tallyPending").textContent = pending;
+  }
+
+  function startScanner() {
+    const scanner = new Html5Qrcode("reader");
+    scanner.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: { width: 250, height: 250 } },
+      (decoded) => {
+        const now = Date.now();
+        if (decoded === lastToken && now - lastScanAt < DEBOUNCE) return;
+        lastToken  = decoded;
+        lastScanAt = now;
+        lookupToken(decoded);
+      },
+      () => {}
+    ).catch(console.error);
+  }
+
+  async function lookupToken(token) {
+    const { data: cars, error } = await sb
+      .from("cars")
+      .select("*")
+      .eq("device_token", token)
+      .eq("event_id", eventId);
+
+    if (error || !cars?.length) {
+      toast("No cars found for this code", false);
+      return;
+    }
+
+    showFamily(cars, token);
+  }
+
+  function manualLookup() {
+    const token = document.getElementById("tokenInput").value.trim();
+    if (!token) return;
+    lookupToken(token);
+  }
+
+  function showFamily(cars, token) {
+    document.getElementById("familyTitle").textContent = `${cars.length} Car${cars.length > 1 ? "s" : ""}`;
+    document.getElementById("carList").innerHTML = cars.map(c => {
+      const statusColor = { legal: "var(--success)", not_legal: "var(--danger)", pending: "var(--muted2)" };
+      const statusLabel = { legal: "Legal ✓", not_legal: "Not Legal ✗", pending: "Pending" };
+      const img = c.image_url
+        ? `<img src="${c.image_url}" alt="${c.kid_name}" style="width:64px; height:64px; object-fit:cover; border-radius:8px; flex-shrink:0;">`
+        : `<div style="width:64px; height:64px; border-radius:8px; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:2rem; flex-shrink:0;">🚗</div>`;
+      return `
+        <div class="fam-car">
+          ${img}
+          <div style="flex:1; min-width:0;">
+            <div class="fam-num">#${c.car_number}</div>
+            <div class="fam-name">${c.kid_name}</div>
+            <div style="font-size:0.78rem; font-weight:700; color:${statusColor[c.legal_status]};">${statusLabel[c.legal_status]}</div>
+          </div>
+          <div class="fam-actions">
+            <button class="btn btn-sm" style="background:var(--success-bg); border:2px solid var(--success); color:var(--success); min-height:44px;"
+                    onclick="setStatus('${c.id}', 'legal')">✓ Legal</button>
+            <button class="btn btn-sm" style="background:var(--danger-bg); border:2px solid var(--danger); color:var(--danger); min-height:44px;"
+                    onclick="setStatus('${c.id}', 'not_legal')">✗ Not Legal</button>
+          </div>
+        </div>`;
+    }).join("");
+
+    document.getElementById("familyOverlay").classList.add("open");
+  }
+
+  function dismissFamily() {
+    document.getElementById("familyOverlay").classList.remove("open");
+    lastToken = null;
+  }
+
+  async function setStatus(carId, status) {
+    const { error } = await sb.from("cars")
+      .update({ legal_status: status })
+      .eq("id", carId);
+
+    if (error) { toast(error.message, false); return; }
+
+    toast(status === "legal" ? "Marked Legal ✓" : "Marked Not Legal ✗", status === "legal");
+
+    // Refresh family sheet
+    lastToken = null; // allow re-scan
+    dismissFamily();
+    await loadTally();
+  }
+
+  function toast(msg, ok = true) {
+    const el = document.getElementById("toast");
+    if (!el) return;
+    el.textContent = msg;
+    el.className = ok ? "show ok" : "show err";
+    setTimeout(() => el.className = "", 3000);
+  }
+</script>
+
+</body>
+</html>

@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard — DerbySystem</title>
+  <link rel="stylesheet" href="/frontend/styles.css" />
+  <script src="/frontend/config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="/frontend/lib/router.js"></script>
+  <script src="/frontend/lib/api.js"></script>
+  <script src="/frontend/lib/auth.js"></script>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────── -->
+<div class="dash-header">
+  <div style="flex:1">
+    <div class="ds-logo">🏁 DerbySystem</div>
+    <div class="ds-user" id="userEmail">Loading…</div>
+  </div>
+  <button class="btn btn-ghost" style="border-color:rgba(255,255,255,.3); color:#fff; min-height:40px; padding:0 14px; font-size:0.85rem;"
+          onclick="signOut()">Sign out</button>
+</div>
+
+<div class="container" style="padding-top:24px;">
+
+  <!-- ── My Events ─────────────────────────────────────────── -->
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+    <h2 style="margin:0;">My Races</h2>
+    <button class="btn btn-primary btn-sm" onclick="openNewEvent()">+ New Race</button>
+  </div>
+
+  <div id="eventList"><span class="spinner"></span></div>
+
+  <!-- ── My Orgs ───────────────────────────────────────────── -->
+  <div style="margin-top:32px; display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+    <h2 style="margin:0;">My Organisations</h2>
+    <button class="btn btn-ghost btn-sm" onclick="openNewOrg()">+ New Org</button>
+  </div>
+
+  <div id="orgList"><span class="spinner"></span></div>
+
+</div>
+
+<!-- ── New Event modal ─────────────────────────────────────── -->
+<div class="confirm-overlay" id="newEventOverlay">
+  <div class="confirm-box" style="max-width:440px; width:100%; text-align:left;">
+    <h3 style="margin-bottom:18px;">Create New Race</h3>
+
+    <label>Organisation</label>
+    <select id="newEvOrg" style="margin-bottom:14px;"></select>
+
+    <label>Event Name</label>
+    <input type="text" id="newEvName" placeholder="e.g. 2026 Pinewood Derby"
+           autocapitalize="words" maxlength="80" />
+
+    <label>Race Date</label>
+    <input type="date" id="newEvDate" />
+
+    <label>Number of Lanes</label>
+    <select id="newEvLanes" style="margin-bottom:14px;">
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="4" selected>4</option>
+      <option value="5">5</option>
+      <option value="6">6</option>
+    </select>
+
+    <label>Admin PIN (4 digits)</label>
+    <input type="tel" id="newEvPin" maxlength="4" placeholder="2468" value="2468" />
+
+    <p id="newEvErr" style="color:var(--danger); font-size:0.82rem; min-height:1.2em; margin-top:-6px; margin-bottom:10px;"></p>
+
+    <div class="confirm-btns" style="margin-top:8px;">
+      <button class="btn btn-ghost btn-full" onclick="closeNewEvent()">Cancel</button>
+      <button class="btn btn-primary btn-full" id="createEvBtn" onclick="createEvent()">Create Race</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── New Org modal ───────────────────────────────────────── -->
+<div class="confirm-overlay" id="newOrgOverlay">
+  <div class="confirm-box" style="max-width:420px; width:100%; text-align:left;">
+    <h3 style="margin-bottom:18px;">Add Organisation</h3>
+
+    <label>Type</label>
+    <select id="newOrgType" style="margin-bottom:14px;">
+      <option value="pack">Pack</option>
+      <option value="troop">Troop</option>
+      <option value="other">Other</option>
+    </select>
+
+    <label>Number / Slug <span style="font-weight:400; text-transform:none; color:var(--muted2);">(used in the URL)</span></label>
+    <input type="text" id="newOrgName" placeholder="e.g. 152 or my-group" maxlength="40" />
+    <p style="font-size:0.78rem; color:var(--muted2); margin-top:-10px; margin-bottom:12px;">Use only letters, numbers, and hyphens. This becomes part of the event URL.</p>
+
+    <label>Display Name</label>
+    <input type="text" id="newOrgDisplay" placeholder="e.g. Pack 152 — Troop 12 BSA" maxlength="80" autocapitalize="words" />
+
+    <p id="newOrgErr" style="color:var(--danger); font-size:0.82rem; min-height:1.2em; margin-top:-6px; margin-bottom:10px;"></p>
+
+    <div class="confirm-btns" style="margin-top:8px;">
+      <button class="btn btn-ghost btn-full" onclick="closeNewOrg()">Cancel</button>
+      <button class="btn btn-primary btn-full" id="createOrgBtn" onclick="createOrg()">Add Org</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Archive confirm ─────────────────────────────────────── -->
+<div class="confirm-overlay" id="archiveOverlay">
+  <div class="confirm-box" style="max-width:360px; width:100%;">
+    <h3>Archive this race?</h3>
+    <p style="margin:12px 0 20px;">The race will be hidden from the public event link. All data is kept for 30 days then automatically deleted.</p>
+    <div class="confirm-btns">
+      <button class="btn btn-ghost btn-full" onclick="closeArchive()">Cancel</button>
+      <button class="btn btn-danger btn-full" id="archiveConfirmBtn" onclick="confirmArchive()">Archive</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  let session = null;
+  let myOrgs  = [];
+  let archiveTargetId = null;
+
+  function toast(msg, ok = true) {
+    const el = document.getElementById("toast");
+    el.textContent = msg;
+    el.className = ok ? "show ok" : "show err";
+    setTimeout(() => el.className = "", 3000);
+  }
+
+  // ── Boot ────────────────────────────────────────────────────
+  (async () => {
+    session = await requireSession();
+    document.getElementById("userEmail").textContent = session.user.email;
+    await Promise.all([loadOrgs(), loadEvents()]);
+  })();
+
+  // ── Orgs ────────────────────────────────────────────────────
+  async function loadOrgs() {
+    const { data, error } = await getMyOrgs(session);
+    myOrgs = data || [];
+    const el = document.getElementById("orgList");
+    if (error) { el.innerHTML = `<p style="color:var(--danger)">${error.message}</p>`; return; }
+    if (!myOrgs.length) {
+      el.innerHTML = `<div class="empty-state">No organisations yet — add one to create your first race.</div>`;
+      return;
+    }
+    el.innerHTML = myOrgs.map(o => `
+      <div class="card" style="padding:14px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-size:1.4rem;">${o.org_type === 'pack' ? '🏕️' : o.org_type === 'troop' ? '⛺' : '🏁'}</span>
+          <div style="flex:1;">
+            <div style="font-weight:700;">${o.display_name}</div>
+            <div style="font-size:0.8rem; color:var(--muted2);">/${o.org_type}/${o.org_name}</div>
+          </div>
+        </div>
+      </div>`).join("");
+  }
+
+  // ── Events ──────────────────────────────────────────────────
+  async function loadEvents() {
+    if (!myOrgs.length) {
+      const { data } = await getMyOrgs(session);
+      myOrgs = data || [];
+    }
+    const orgIds = myOrgs.map(o => o.id);
+    const el = document.getElementById("eventList");
+
+    if (!orgIds.length) {
+      el.innerHTML = `<div class="empty-state">Create an organisation first, then you can create a race.</div>`;
+      return;
+    }
+
+    const { data: events, error } = await sb
+      .from("events")
+      .select("*, orgs(org_type, org_name, display_name)")
+      .in("org_id", orgIds)
+      .order("event_date", { ascending: false });
+
+    if (error) { el.innerHTML = `<p style="color:var(--danger)">${error.message}</p>`; return; }
+
+    if (!events?.length) {
+      el.innerHTML = `<div class="empty-state">No races yet — create your first one above!</div>`;
+      return;
+    }
+
+    el.innerHTML = events.map(ev => {
+      const org  = ev.orgs;
+      const adminUrl  = `/admin/#/${org.org_type}/${org.org_name}`;
+      const eventUrl  = `/event/#/${org.org_type}/${org.org_name}`;
+      const statusBadge = ev.status === 'active'
+        ? `<span class="badge badge-active">Active</span>`
+        : `<span class="badge badge-completed">Archived</span>`;
+      return `
+        <div class="event-card">
+          <span class="ev-icon">${ev.status === 'active' ? '🏁' : '📦'}</span>
+          <div style="flex:1; min-width:0;">
+            <div class="ev-org">${org.display_name}</div>
+            <div class="ev-name">${ev.name} ${statusBadge}</div>
+            <div class="ev-date">${ev.event_date}</div>
+          </div>
+          <div class="ev-actions">
+            ${ev.status === 'active' ? `
+              <a href="${adminUrl}" class="btn btn-primary btn-sm">Admin →</a>
+              <button class="btn btn-ghost btn-sm" onclick="copyLink('${location.origin}${eventUrl}')">Copy parent link</button>
+              <button class="btn btn-ghost-danger btn-sm" onclick="openArchive('${ev.id}')">Archive</button>
+            ` : `
+              <button class="btn btn-ghost btn-sm" style="opacity:.6;" disabled>Archived</button>
+            `}
+          </div>
+        </div>`;
+    }).join("");
+  }
+
+  function copyLink(url) {
+    navigator.clipboard.writeText(url).then(() => toast("Link copied!")).catch(() => {
+      prompt("Copy this link:", url);
+    });
+  }
+
+  // ── New event modal ──────────────────────────────────────────
+  function openNewEvent() {
+    // Max 2 active events check is done server-side (db trigger)
+    const sel = document.getElementById("newEvOrg");
+    sel.innerHTML = myOrgs.map(o =>
+      `<option value="${o.id}">${o.display_name}</option>`
+    ).join("") || '<option value="">— add an org first —</option>';
+    document.getElementById("newEvErr").textContent = "";
+    // Default date to today
+    document.getElementById("newEvDate").value = new Date().toISOString().slice(0, 10);
+    document.getElementById("newEventOverlay").classList.add("open");
+  }
+
+  function closeNewEvent() {
+    document.getElementById("newEventOverlay").classList.remove("open");
+  }
+
+  async function createEvent() {
+    const orgId = document.getElementById("newEvOrg").value;
+    const name  = document.getElementById("newEvName").value.trim();
+    const date  = document.getElementById("newEvDate").value;
+    const lanes = parseInt(document.getElementById("newEvLanes").value);
+    const pin   = document.getElementById("newEvPin").value.trim();
+    const errEl = document.getElementById("newEvErr");
+
+    if (!orgId) { errEl.textContent = "Select an organisation"; return; }
+    if (!name)  { errEl.textContent = "Enter an event name"; return; }
+    if (!date)  { errEl.textContent = "Enter a race date"; return; }
+    if (!/^\d{4}$/.test(pin)) { errEl.textContent = "PIN must be 4 digits"; return; }
+
+    const btn = document.getElementById("createEvBtn");
+    btn.disabled = true;
+    btn.textContent = "Creating…";
+    errEl.textContent = "";
+
+    const { data, error } = await sb.from("events").insert({
+      org_id: orgId, name, event_date: date,
+      num_lanes: lanes, admin_pin: pin,
+    }).select().single();
+
+    btn.disabled = false;
+    btn.textContent = "Create Race";
+
+    if (error) {
+      // Friendly messages for trigger exceptions
+      if (error.message.includes("Too many active races")) {
+        errEl.textContent = "You already have 2 active races — archive one first.";
+      } else if (error.message.includes("more than 2 months")) {
+        errEl.textContent = "Race date cannot be more than 2 months in the future.";
+      } else {
+        errEl.textContent = error.message;
+      }
+      return;
+    }
+
+    // Also create the race_state row for this event
+    await sb.from("race_state").insert({ event_id: data.id });
+
+    closeNewEvent();
+    toast("Race created!");
+    await loadEvents();
+  }
+
+  // ── New org modal ────────────────────────────────────────────
+  function openNewOrg() {
+    document.getElementById("newOrgErr").textContent = "";
+    document.getElementById("newOrgOverlay").classList.add("open");
+  }
+
+  function closeNewOrg() {
+    document.getElementById("newOrgOverlay").classList.remove("open");
+  }
+
+  async function createOrg() {
+    const type    = document.getElementById("newOrgType").value;
+    const name    = document.getElementById("newOrgName").value.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    const display = document.getElementById("newOrgDisplay").value.trim();
+    const errEl   = document.getElementById("newOrgErr");
+
+    if (!name)    { errEl.textContent = "Enter a number or slug"; return; }
+    if (!display) { errEl.textContent = "Enter a display name"; return; }
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+      errEl.textContent = "Use only letters, numbers, and hyphens";
+      return;
+    }
+
+    const btn = document.getElementById("createOrgBtn");
+    btn.disabled = true;
+    btn.textContent = "Creating…";
+    errEl.textContent = "";
+
+    const { error } = await sb.from("orgs").insert({
+      owner_id: session.user.id,
+      org_type: type,
+      org_name: name,
+      display_name: display,
+    });
+
+    btn.disabled = false;
+    btn.textContent = "Add Org";
+
+    if (error) {
+      if (error.message.includes("unique") || error.message.includes("duplicate")) {
+        errEl.textContent = `${type}/${name} already exists — please contact support if this is your org.`;
+      } else {
+        errEl.textContent = error.message;
+      }
+      return;
+    }
+
+    closeNewOrg();
+    toast("Organisation added!");
+    await Promise.all([loadOrgs(), loadEvents()]);
+  }
+
+  // ── Archive event ────────────────────────────────────────────
+  function openArchive(id) {
+    archiveTargetId = id;
+    document.getElementById("archiveOverlay").classList.add("open");
+  }
+
+  function closeArchive() {
+    archiveTargetId = null;
+    document.getElementById("archiveOverlay").classList.remove("open");
+  }
+
+  async function confirmArchive() {
+    if (!archiveTargetId) return;
+    const { error } = await sb.from("events")
+      .update({ status: "archived" })
+      .eq("id", archiveTargetId);
+    closeArchive();
+    if (error) { toast(error.message, false); return; }
+    toast("Race archived");
+    await loadEvents();
+  }
+</script>
+
+</body>
+</html>

@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Hub — DerbySystem</title>
+  <link rel="stylesheet" href="/frontend/styles.css" />
+  <script src="/frontend/config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="/frontend/lib/router.js"></script>
+  <script src="/frontend/lib/api.js"></script>
+  <script src="/frontend/lib/admin.js"></script>
+</head>
+<body>
+
+<!-- PIN gate -->
+<div id="pinGate" style="position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;align-items:center;justify-content:center;">
+  <div style="text-align:center;max-width:300px;padding:20px;">
+    <h2 style="margin-bottom:8px;">Admin Access</h2>
+    <p style="margin-bottom:16px;">Enter the 4-digit PIN</p>
+    <input type="tel" id="pinInput" maxlength="4" placeholder="••••" autocomplete="off"
+           style="text-align:center;font-size:2rem;letter-spacing:12px;width:160px;margin:0 auto 16px;display:block;" />
+    <p id="pinErr" style="color:var(--danger);font-size:0.82rem;min-height:1.4em;"></p>
+  </div>
+</div>
+
+<nav class="top-nav">
+  <span class="brand" id="navBrand">Derby</span>
+  <span id="navLinks"></span>
+</nav>
+
+<div class="container">
+  <div class="page-header" style="margin-top:24px;">
+    <div class="title-block">
+      <h1>Race Control</h1>
+      <p id="eventSubtitle">Loading…</p>
+    </div>
+  </div>
+
+  <!-- Status strip -->
+  <div class="card" id="statusCard">
+    <div class="card-title">Event Status</div>
+    <div class="status-bar" id="statusBody"><span class="spinner"></span></div>
+  </div>
+
+  <!-- Station cards -->
+  <div class="station-grid" id="stationGrid">
+    <!-- populated in JS so hrefs can include hash context -->
+  </div>
+
+  <!-- Round management -->
+  <div class="card">
+    <div class="card-title">Round Management</div>
+    <div id="roundMgmt"><span class="spinner"></span></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  let ctx, event, eventId;
+
+  (async () => {
+    ({ ctx, event, eventId } = await adminBoot());
+
+    document.title = `Admin — ${event.name}`;
+    document.getElementById("navBrand").textContent = "🏁 " + (event.track_name || "Derby");
+    document.getElementById("navLinks").innerHTML   = buildAdminNav(ctx, "index");
+    document.getElementById("eventSubtitle").textContent = `${event.name} · ${event.event_date}`;
+
+    // Build station grid with hash context
+    const hash = `#/${ctx.org}/${ctx.name}`;
+    document.getElementById("stationGrid").innerHTML = [
+      { href: `/admin/inspection/${hash}`, icon: "🔍", title: "Inspection",   desc: "Scan QR, approve / reject cars" },
+      { href: `/admin/track/${hash}`,      icon: "🛤️", title: "Track",        desc: "Browse lane assignments for each heat" },
+      { href: `/admin/results/${hash}`,    icon: "🏁", title: "Race Officials",desc: "Heat control, results entry, round management" },
+      { href: `/admin/cars/${hash}`,       icon: "🚗", title: "Cars",          desc: "View and edit all registered cars" },
+    ].map(s => `
+      <a href="${s.href}" class="station-card">
+        <span class="icon">${s.icon}</span>
+        <h3>${s.title}</h3>
+        <p>${s.desc}</p>
+      </a>`).join("");
+
+    await Promise.all([loadStatus(), loadRoundMgmt()]);
+
+    // Live updates
+    subscribeTable(eventId, "race_state",   loadStatus);
+    subscribeTable(eventId, "rounds",       loadRoundMgmt);
+    subscribeTable(eventId, "heats",        loadStatus);
+    subscribeTable(eventId, "heat_results", loadStatus);
+  })();
+
+  async function loadStatus() {
+    const { data: cars }  = await sb.from("cars").select("id, legal_status").eq("event_id", eventId);
+    const { data: rounds} = await sb.from("rounds").select("id, status").eq("event_id", eventId);
+    const { data: state } = await sb.from("race_state").select("*").eq("event_id", eventId).single();
+
+    const total   = cars?.length ?? 0;
+    const legal   = cars?.filter(c => c.legal_status === "legal").length   ?? 0;
+    const illegal = cars?.filter(c => c.legal_status === "not_legal").length ?? 0;
+    const activeRound = rounds?.find(r => r.status === "active");
+
+    document.getElementById("statusBody").innerHTML = `
+      <div class="stat-item"><div class="stat-label">Cars</div><div class="stat-val">${total}</div></div>
+      <div class="stat-item"><div class="stat-label">Legal</div><div class="stat-val" style="color:var(--success)">${legal}</div></div>
+      <div class="stat-item"><div class="stat-label">Illegal</div><div class="stat-val" style="color:var(--danger)">${illegal}</div></div>
+      <div class="stat-item"><div class="stat-label">Round</div><div class="stat-val" style="color:var(--accent2)">${activeRound ? rounds.indexOf(activeRound) + 1 : "—"}</div></div>`;
+  }
+
+  async function loadRoundMgmt() {
+    const { data: rounds } = await sb
+      .from("rounds")
+      .select("id, round_number, status, advance_count")
+      .eq("event_id", eventId)
+      .order("round_number");
+
+    const el = document.getElementById("roundMgmt");
+    const activeRound = rounds?.find(r => r.status === "active");
+
+    let html = "";
+    if (rounds?.length) {
+      html += rounds.map(r => {
+        const badge = r.status === "active" ? `<span class="badge badge-active">Active</span>`
+                    : r.status === "completed" ? `<span class="badge badge-completed">Done</span>`
+                    : `<span class="badge badge-pending">Pending</span>`;
+        return `<div style="display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--border);">
+          <div style="flex:1; font-weight:700;">Round ${r.round_number}</div>
+          ${badge}
+          ${r.status === "active" ? `<button class="btn btn-ghost btn-sm" onclick="closeRound('${r.id}')">Close Round</button>` : ""}
+        </div>`;
+      }).join("");
+    } else {
+      html = `<div class="empty-state">No rounds yet — start one to begin the race.</div>`;
+    }
+
+    const canCreate = !activeRound;
+    html += `<div style="margin-top:14px;">
+      <button class="btn btn-primary btn-sm" onclick="startRound()" ${canCreate ? "" : "disabled"}>
+        ${canCreate ? "+ Start New Round" : "Close current round first"}
+      </button>
+    </div>`;
+    el.innerHTML = html;
+  }
+
+  async function startRound() {
+    const { data: existing } = await sb
+      .from("rounds")
+      .select("round_number")
+      .eq("event_id", eventId)
+      .order("round_number", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const nextNum = (existing?.round_number ?? 0) + 1;
+
+    const { data: round, error } = await sb
+      .from("rounds")
+      .insert({ event_id: eventId, round_number: nextNum, status: "active" })
+      .select().single();
+
+    if (error) { toast(error.message, false); return; }
+
+    // Update race_state
+    await sb.from("race_state").update({ current_round_id: round.id, updated_at: new Date().toISOString() }).eq("event_id", eventId);
+
+    // Generate heats (round-robin: each car races in every lane once across heats)
+    await generateHeats(round.id);
+    toast(`Round ${nextNum} started!`);
+    await Promise.all([loadStatus(), loadRoundMgmt()]);
+  }
+
+  async function generateHeats(roundId) {
+    const { data: cars } = await sb
+      .from("cars")
+      .select("id")
+      .eq("event_id", eventId)
+      .eq("eliminated", false);
+
+    if (!cars?.length) return;
+
+    const numL = event.num_lanes || 4;
+    const ids  = cars.map(c => c.id);
+
+    // Simple rotation schedule: group cars into heats of `numL`
+    // Each heat: take next numL cars (wrap around). Not a true round-robin
+    // for full coverage, but works for simple events.
+    const heats = [];
+    for (let i = 0; i < ids.length; i += numL) {
+      heats.push(ids.slice(i, i + numL));
+    }
+
+    for (let hi = 0; hi < heats.length; hi++) {
+      const { data: heat } = await sb
+        .from("heats")
+        .insert({ event_id: eventId, round_id: roundId, heat_number: hi + 1, status: "pending" })
+        .select().single();
+
+      const entries = heats[hi].map((carId, li) => ({
+        event_id: eventId,
+        heat_id: heat.id,
+        lane_number: li + 1,
+        car_id: carId,
+      }));
+      await sb.from("heat_entries").insert(entries);
+    }
+
+    // Set first heat as active
+    const { data: firstHeat } = await sb
+      .from("heats")
+      .select("id")
+      .eq("round_id", roundId)
+      .eq("heat_number", 1)
+      .single();
+
+    if (firstHeat) {
+      await sb.from("heats").update({ status: "active" }).eq("id", firstHeat.id);
+      await sb.from("race_state")
+        .update({ current_heat_id: firstHeat.id, updated_at: new Date().toISOString() })
+        .eq("event_id", eventId);
+    }
+  }
+
+  async function closeRound(roundId) {
+    await sb.from("rounds").update({ status: "completed" }).eq("id", roundId);
+    await sb.from("race_state")
+      .update({ current_round_id: null, current_heat_id: null, updated_at: new Date().toISOString() })
+      .eq("event_id", eventId);
+    toast("Round closed");
+    await Promise.all([loadStatus(), loadRoundMgmt()]);
+  }
+</script>
+
+</body>
+</html>
