@@ -165,9 +165,7 @@
     document.getElementById("carList").innerHTML = cars.map(c => {
       const statusColor = { legal: "var(--success)", not_legal: "var(--danger)", pending: "var(--muted2)" };
       const statusLabel = { legal: "Legal ✓", not_legal: "Not Legal ✗", pending: "Pending" };
-      const img = c.image_url
-        ? `<img src="${c.image_url}" alt="${c.kid_name}" style="width:64px; height:64px; object-fit:cover; border-radius:8px; flex-shrink:0;">`
-        : `<div style="width:64px; height:64px; border-radius:8px; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:2rem; flex-shrink:0;">🚗</div>`;
+      const img = `<div style="width:64px; height:64px; border-radius:8px; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:2rem; flex-shrink:0;">🚗</div>`;
       return `
         <div class="fam-car">
           ${img}

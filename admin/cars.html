@@ -48,13 +48,6 @@
       <h3 style="margin-bottom:18px;">Add Car</h3>
       <label>Racer Name</label>
       <input type="text" id="addName" autocapitalize="words" placeholder="e.g. Jamie Smith" />
-      <label style="margin-top:12px;">Photo <span style="font-weight:400; color:var(--muted); text-transform:none;">(recommended)</span></label>
-      <input type="file" id="addPhoto" accept="image/*" capture="environment"
-             style="margin-bottom:10px;" onchange="previewPhoto(this, 'addPreview', 'addPreviewWrap')" />
-      <div id="addPreviewWrap" style="display:none; text-align:center; margin-bottom:14px;">
-        <img id="addPreview" src="" alt="preview"
-             style="max-width:100%; max-height:200px; border-radius:10px; border:1px solid var(--border); object-fit:cover;" />
-      </div>
       <p id="addErr" style="color:var(--danger); font-size:0.82rem; min-height:1.2em; margin-bottom:8px;"></p>
       <div class="confirm-btns" style="margin-top:4px;">
         <button class="btn btn-ghost btn-full" onclick="closeAddCar()">Cancel</button>
@@ -70,13 +63,6 @@
     <h3 style="margin-bottom:18px;">Edit Car</h3>
     <label>Racer Name</label>
     <input type="text" id="editName" autocapitalize="words" />
-    <label style="margin-top:12px;">Replace Photo <span style="font-weight:400; color:var(--muted); text-transform:none;">(optional)</span></label>
-    <input type="file" id="editPhoto" accept="image/*" capture="environment"
-           style="margin-bottom:10px;" onchange="previewPhoto(this, 'editPreview', 'editPreviewWrap')" />
-    <div id="editPreviewWrap" style="display:none; text-align:center; margin-bottom:14px;">
-      <img id="editPreview" src="" alt="preview"
-           style="max-width:100%; max-height:160px; border-radius:10px; border:1px solid var(--border); object-fit:cover;" />
-    </div>
     <label style="margin-top:8px;">Legal Status</label>
     <select id="editStatus" style="margin-bottom:14px;">
       <option value="pending">Pending</option>
@@ -109,7 +95,6 @@
   let ctx, event, eventId;
   let editCarId  = null;
   let deleteCarId = null;
-  let STORAGE_BUCKET = "car-images";
 
   (async () => {
     ({ ctx, event, eventId } = await adminBoot());
@@ -137,9 +122,7 @@
     const statusLabel = { legal: "Legal ✓", not_legal: "Not Legal ✗", pending: "Pending" };
 
     el.innerHTML = cars.map(c => {
-      const img = c.image_url
-        ? `<img src="${c.image_url}" alt="${c.kid_name}" style="width:56px; height:56px; object-fit:cover; border-radius:8px; border:1px solid var(--border); flex-shrink:0;">`
-        : `<div style="width:56px; height:56px; border-radius:8px; background:var(--surface2); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; font-size:1.5rem; flex-shrink:0;">🚗</div>`;
+      const img = `<div style="width:56px; height:56px; border-radius:8px; background:var(--surface2); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; font-size:1.5rem; flex-shrink:0;">🚗</div>`;
       return `
         <div style="display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--border);">
           ${img}
@@ -156,22 +139,9 @@
     }).join("");
   }
 
-  function previewPhoto(input, imgId, wrapId) {
-    const wrap = document.getElementById(wrapId);
-    const img  = document.getElementById(imgId);
-    if (input.files?.[0]) {
-      wrap.style.display = "block";
-      img.src = URL.createObjectURL(input.files[0]);
-    } else {
-      wrap.style.display = "none";
-    }
-  }
-
   // ── Add car ──────────────────────────────────────────────────
   function openAddCar() {
     document.getElementById("addName").value = "";
-    document.getElementById("addPhoto").value = "";
-    document.getElementById("addPreviewWrap").style.display = "none";
     document.getElementById("addErr").textContent = "";
     document.getElementById("addOverlay").classList.add("open");
   }
@@ -182,7 +152,6 @@
 
   async function submitAddCar() {
     const name  = document.getElementById("addName").value.trim();
-    const photo = document.getElementById("addPhoto").files?.[0];
     const errEl = document.getElementById("addErr");
     if (!name) { errEl.textContent = "Enter a racer name"; return; }
 
@@ -190,17 +159,7 @@
     btn.disabled = true; btn.textContent = "Saving…";
     errEl.textContent = "";
 
-    let image_url = null;
-    if (photo) {
-      const path = `${eventId}/${Date.now()}_${photo.name.replace(/[^a-z0-9.]/gi, "_")}`;
-      const { error: upErr } = await sb.storage.from(STORAGE_BUCKET).upload(path, photo, { upsert: true });
-      if (!upErr) {
-        const { data: { publicUrl } } = sb.storage.from(STORAGE_BUCKET).getPublicUrl(path);
-        image_url = publicUrl;
-      }
-    }
-
-    const { error } = await sb.from("cars").insert({ event_id: eventId, kid_name: name, image_url });
+    const { error } = await sb.from("cars").insert({ event_id: eventId, kid_name: name });
     btn.disabled = false; btn.textContent = "Add Car";
 
     if (error) { errEl.textContent = error.message; return; }
@@ -216,8 +175,6 @@
     if (!car) return;
     document.getElementById("editName").value   = car.kid_name;
     document.getElementById("editStatus").value = car.legal_status;
-    document.getElementById("editPhoto").value  = "";
-    document.getElementById("editPreviewWrap").style.display = "none";
     document.getElementById("editErr").textContent = "";
     document.getElementById("editOverlay").classList.add("open");
   }
@@ -231,24 +188,13 @@
     if (!editCarId) return;
     const name   = document.getElementById("editName").value.trim();
     const status = document.getElementById("editStatus").value;
-    const photo  = document.getElementById("editPhoto").files?.[0];
     const errEl  = document.getElementById("editErr");
     if (!name) { errEl.textContent = "Enter a racer name"; return; }
 
     const btn = document.getElementById("editSaveBtn");
     btn.disabled = true; btn.textContent = "Saving…";
 
-    let updates = { kid_name: name, legal_status: status };
-    if (photo) {
-      const path = `${eventId}/${Date.now()}_${photo.name.replace(/[^a-z0-9.]/gi, "_")}`;
-      const { error: upErr } = await sb.storage.from(STORAGE_BUCKET).upload(path, photo, { upsert: true });
-      if (!upErr) {
-        const { data: { publicUrl } } = sb.storage.from(STORAGE_BUCKET).getPublicUrl(path);
-        updates.image_url = publicUrl;
-      }
-    }
-
-    const { error } = await sb.from("cars").update(updates).eq("id", editCarId);
+    const { error } = await sb.from("cars").update({ kid_name: name, legal_status: status }).eq("id", editCarId);
     btn.disabled = false; btn.textContent = "Save";
 
     if (error) { errEl.textContent = error.message; return; }
