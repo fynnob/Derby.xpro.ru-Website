@@ -3,221 +3,418 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Live Results — DerbySystem</title>
-  <meta name="description" content="Live Pinewood Derby race results" />
-  <link rel="stylesheet" href="/frontend/styles.css" />
+  <title>Register — Derby</title>
+  <meta name="description" content="Register your car for the Pinewood Derby" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <script src="/frontend/config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script src="/frontend/lib/router.js"></script>
   <script src="/frontend/lib/api.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #f5f7fa; --surface: #ffffff; --card: #ffffff; --border: #e5e7eb;
+      --amber: #f59e0b; --amber-light: #fffbeb; --text: #111827; --muted: #6b7280; --muted2: #9ca3af;
+      --danger: #ef4444; --success: #22c55e; --blue: #3b82f6;
+      --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+      --shadow-md: 0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.05);
+    }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg); color: var(--text);
+      min-height: 100vh;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    nav {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 0 20px; height: 60px;
+      display: flex; align-items: center; gap: 12px;
+      position: sticky; top: 0; z-index: 100;
+    }
+    .brand { font-size: 1.1rem; font-weight: 900; color: var(--amber); letter-spacing: 1px; }
+    .brand-sub { font-size: 0.78rem; color: var(--muted); font-weight: 500; }
+    nav .ml { margin-left: auto; font-size: 0.78rem; color: var(--muted2); display: flex; align-items: center; gap: 8px; }
+    .container { max-width: 640px; margin: 0 auto; padding: 24px 16px 80px; }
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 16px; padding: 24px; margin-bottom: 16px;
+      box-shadow: var(--shadow);
+    }
+    .card-title { font-size: 0.7rem; font-weight: 800; letter-spacing: 3px; text-transform: uppercase; color: var(--muted); margin-bottom: 16px; }
+    .form-group { margin-bottom: 14px; }
+    label { display: block; font-size: 0.8rem; font-weight: 700; color: var(--muted); margin-bottom: 5px; letter-spacing: .5px; text-transform: uppercase; }
+    input[type=text], input[type=number] {
+      width: 100%; padding: 11px 14px; border: 1.5px solid var(--border); border-radius: 10px;
+      font-size: 1rem; font-family: inherit; color: var(--text); background: var(--bg);
+      transition: border-color .15s;
+    }
+    input:focus { outline: none; border-color: var(--amber); }
+    input:disabled { opacity: .5; cursor: not-allowed; }
+    .btn {
+      width: 100%; padding: 13px; border: none; border-radius: 12px;
+      font-size: 1rem; font-weight: 800; cursor: pointer; transition: opacity .15s, transform .1s;
+      letter-spacing: .5px;
+    }
+    .btn:active { transform: scale(.98); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+    .btn-primary { background: var(--amber); color: #fff; }
+    .btn-sm { padding: 7px 14px; border-radius: 8px; font-size: 0.82rem; font-weight: 700; border: none; cursor: pointer; }
+    .btn-outline { background: none; border: 1.5px solid var(--border); color: var(--text); }
+    .btn-danger-sm { background: #fee2e2; color: var(--danger); }
+    .car-card {
+      border: 1.5px solid var(--border); border-radius: 14px; padding: 16px 18px;
+      margin-bottom: 10px; display: flex; align-items: center; gap: 14px;
+    }
+    .car-card .car-num { font-size: 1.6rem; font-weight: 900; color: var(--amber); min-width: 52px; text-align: center; }
+    .car-card .car-info { flex: 1; }
+    .car-card .car-name { font-size: 1rem; font-weight: 700; }
+    .car-card .car-status { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+    .car-card .car-actions { display: flex; gap: 6px; }
+    .status-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 6px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+    .badge-pending  { background: #fef9c3; color: #854d0e; }
+    .badge-legal    { background: #dcfce7; color: #166534; }
+    .badge-not_legal{ background: #fee2e2; color: #991b1b; }
+    .race-banner {
+      background: linear-gradient(135deg, #1e3a5f, #2563eb);
+      color: #fff; border-radius: 14px; padding: 20px 24px; margin-bottom: 16px;
+      text-align: center;
+    }
+    .race-banner .rb-sub { font-size: 0.7rem; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: rgba(255,255,255,.7); margin-bottom: 6px; }
+    .race-banner .rb-main { font-size: 1.3rem; font-weight: 900; }
+    .lane-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .lane-row:last-child { border-bottom: none; }
+    .lane-num { width: 30px; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; color: var(--muted); }
+    .lane-car { flex: 1; }
+    .lane-car .lc-name { font-size: 0.95rem; font-weight: 700; }
+    .lane-car .lc-num  { font-size: 0.78rem; color: var(--muted); }
+    .lane-highlighted { background: rgba(245,158,11,.1); border-radius: 10px; padding: 8px 10px; }
+    .empty-state { text-align: center; color: var(--muted2); padding: 28px 0; font-size: 0.9rem; }
+    .qr-box { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+    .qr-box .qr-url { font-size: 0.75rem; color: var(--muted); word-break: break-all; text-align: center; }
+    .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--amber); border-radius: 50%; animation: spin .7s linear infinite; margin: 20px auto; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    /* Modal */
+    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 200; display: none; align-items: center; justify-content: center; padding: 16px; }
+    .modal-bg.open { display: flex; }
+    .modal { background: var(--card); border-radius: 20px; padding: 28px 24px; width: 100%; max-width: 400px; box-shadow: var(--shadow-md); }
+    .modal h3 { font-size: 1.1rem; font-weight: 800; margin-bottom: 6px; }
+    .modal p.sub { font-size: 0.82rem; color: var(--muted); margin-bottom: 20px; }
+    .modal-footer { display: flex; gap: 10px; margin-top: 16px; }
+    .modal-footer .btn { width: auto; flex: 1; }
+    .btn-ghost { background: var(--bg); color: var(--text); border: 1.5px solid var(--border); }
+    .toast-wrap { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 999; pointer-events: none; }
+    .toast { background: #1f2937; color: #fff; padding: 12px 22px; border-radius: 12px; font-size: 0.88rem; font-weight: 600; opacity: 0; transition: opacity .25s; white-space: nowrap; }
+    .toast.show { opacity: 1; }
+    .toast.ok  { background: #166534; }
+    .toast.err { background: #991b1b; }
+  </style>
 </head>
 <body>
 
-<nav class="top-nav">
+<nav>
   <span class="brand" id="navBrand">🏁 Derby</span>
-  <span id="eventName" style="font-size:0.82rem; color:var(--muted); margin-left:4px;"></span>
-  <a href="/" style="margin-left:auto; font-size:0.8rem; color:var(--muted2);">DerbySystem</a>
+  <span class="brand-sub" id="navSub"></span>
+  <div class="ml">
+    <span id="raceStatusDot" style="width:8px;height:8px;border-radius:50%;background:var(--muted2);display:inline-block;"></span>
+    <span id="raceStatusText" style="color:var(--muted2);">Loading…</span>
+  </div>
 </nav>
 
-<div class="container" style="padding-top:20px;">
+<div class="container">
 
-  <!-- Current heat banner -->
-  <div class="card" id="heatBanner" style="display:none; background:linear-gradient(135deg,#1e3a5f,#2563eb); border:none; color:#fff; text-align:center; padding:18px;">
-    <div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:1.2px; color:rgba(255,255,255,.7); margin-bottom:4px;">Now Running</div>
-    <div id="heatBannerText" style="font-size:1.3rem; font-weight:800; color:#fff;"></div>
+  <!-- Race banner -->
+  <div id="raceBanner" style="display:none;"></div>
+
+  <!-- Register form -->
+  <div class="card" id="registerCard">
+    <div class="card-title">Register Your Car</div>
+    <div class="form-group">
+      <label>Racer's Name</label>
+      <input type="text" id="kidName" placeholder="e.g. Jamie" autocomplete="off" />
+    </div>
+    <div class="form-group">
+      <label>Car Number</label>
+      <input type="number" id="carNumber" placeholder="e.g. 42" min="1" max="999" />
+    </div>
+    <button class="btn btn-primary" id="regBtn" disabled>🏎 Register</button>
   </div>
 
-  <!-- Lane board (current heat) -->
-  <div id="laneSection" style="display:none;">
-    <div class="card-title" style="margin-bottom:8px; padding:0;">On Track</div>
-    <div class="lane-board" id="laneBoard"></div>
+  <!-- My cars -->
+  <div class="card" id="myCarsCard" style="display:none;">
+    <div class="card-title">My Cars</div>
+    <div id="myCarsList"></div>
   </div>
 
-  <!-- Leaderboard -->
-  <div class="card">
-    <div class="card-title">Leaderboard</div>
-    <div id="leaderboard"><span class="spinner"></span></div>
+  <!-- Current heat -->
+  <div id="heatCard" style="display:none;">
+    <div class="race-banner" id="heatBanner"></div>
+    <div class="card" id="laneCard">
+      <div class="card-title">On Track Now</div>
+      <div id="laneBoard"></div>
+    </div>
   </div>
 
-  <!-- All heats / history -->
-  <div class="card">
-    <div class="card-title">Results</div>
-    <div id="heatHistory"><span class="spinner"></span></div>
+  <!-- QR code for easy sharing -->
+  <div class="card" id="qrCard" style="display:none;">
+    <div class="card-title">Share Registration</div>
+    <div class="qr-box">
+      <div id="qrCode"></div>
+      <div class="qr-url" id="qrUrl"></div>
+    </div>
   </div>
 
 </div>
 
+<!-- Edit modal -->
+<div class="modal-bg" id="editModal">
+  <div class="modal">
+    <h3>Edit Car</h3>
+    <p class="sub">Update your racer's name.</p>
+    <div class="form-group">
+      <label>Racer's Name</label>
+      <input type="text" id="editName" />
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeEdit()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEdit()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap"><div id="toast" class="toast"></div></div>
+
 <script>
-  let eventId    = null;
-  let numLanes   = 4;
-  let eventCache = null;
+  let eventId, event, ctx;
+  let STORE_KEY = 'derby_my_cars';
+  const TOKEN_KEY = 'derby_device_token';
+  let editingCarId = null;
+  let numLanes = 4;
 
-  // ── Boot ────────────────────────────────────────────────────
-  (async () => {
-    let ctx, event;
-    try { ({ ctx, event, eventId } = await initPage()); }
-    catch { return; } // die() already showed error
-
-    eventCache = event;
-    numLanes = event.num_lanes || 4;
-
-    document.title = `${event.name} — Live Results`;
-    document.getElementById("eventName").textContent = event.name;
-    document.getElementById("navBrand").textContent  = "🏁 " + (event.track_name || "Derby");
-
-    await Promise.all([loadLeaderboard(), loadCurrentHeat(), loadHistory()]);
-    subscribeAll();
-  })();
-
-  // ── Leaderboard ──────────────────────────────────────────────
-  async function loadLeaderboard() {
-    const { data, error } = await sb
-      .from("round_standings")
-      .select("*")
-      .eq("event_id", eventId)
-      .order("standing");
-
-    const el = document.getElementById("leaderboard");
-    if (!data?.length) {
-      el.innerHTML = `<div class="empty-state">No results yet — race in progress!</div>`;
-      return;
-    }
-
-    const medals = ["🥇", "🥈", "🥉"];
-    el.innerHTML = data.map((row, i) => `
-      <div class="leaderboard-row rank-${row.standing}">
-        <div class="rank">${medals[row.standing - 1] || row.standing}</div>
-        <div class="car-num">#${row.car_number}</div>
-        <div class="name">${row.kid_name}</div>
-        <div class="pts">${row.total_points} pts</div>
-      </div>`).join("");
+  // ── Helpers ──────────────────────────────────────────────────
+  function getToken() {
+    let t = localStorage.getItem(TOKEN_KEY);
+    if (!t) { t = crypto.randomUUID(); localStorage.setItem(TOKEN_KEY, t); }
+    return t;
+  }
+  function getMyCars() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch { return []; }
+  }
+  function saveMyCars(arr) { localStorage.setItem(STORE_KEY, JSON.stringify(arr)); }
+  function toast(msg, ok = true) {
+    const el = document.getElementById('toast');
+    el.textContent = msg; el.className = 'toast show ' + (ok ? 'ok' : 'err');
+    setTimeout(() => el.className = 'toast', 3000);
+  }
+  function badgeHtml(status) {
+    const map = { pending: '⏳ Pending', legal: '✅ Legal', not_legal: '❌ Not Legal' };
+    return `<span class="status-badge badge-${status}">${map[status] || status}</span>`;
   }
 
-  // ── Current heat ─────────────────────────────────────────────
+  // ── Boot ─────────────────────────────────────────────────────
+  (async () => {
+    try { ({ ctx, event, eventId } = await initPage()); }
+    catch { return; }
+
+    STORE_KEY   = 'derby_my_cars_' + eventId;
+    numLanes    = event.num_lanes || 4;
+
+    document.title = `${event.name} — Register`;
+    document.getElementById('navBrand').textContent = '🏁 ' + (event.track_name || 'Derby');
+    document.getElementById('navSub').textContent   = event.name;
+
+    // Generate QR for this page
+    const pageUrl = location.origin + '/frontend/event/' + location.hash;
+    document.getElementById('qrUrl').textContent = pageUrl;
+    if (typeof QRCode !== 'undefined') {
+      new QRCode(document.getElementById('qrCode'), {
+        text: pageUrl, width: 160, height: 160,
+        colorDark: '#111827', colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.M
+      });
+    }
+    document.getElementById('qrCard').style.display = 'block';
+
+    // Enable form
+    document.getElementById('regBtn').disabled = false;
+
+    await Promise.all([renderMyCars(), loadRaceStatus(), loadCurrentHeat()]);
+    startSubscriptions();
+  })();
+
+  // ── Registration ─────────────────────────────────────────────
+  document.getElementById('regBtn').addEventListener('click', async () => {
+    const name = document.getElementById('kidName').value.trim();
+    const num  = parseInt(document.getElementById('carNumber').value.trim(), 10);
+    if (!name)       { toast('Enter a racer name', false); return; }
+    if (!num || num < 1) { toast('Enter a valid car number', false); return; }
+
+    const token = getToken();
+    const btn = document.getElementById('regBtn');
+    btn.disabled = true; btn.textContent = 'Registering…';
+
+    const { data, error } = await sb.from('cars').insert({
+      kid_name: name, car_number: num,
+      device_token: token, event_id: eventId,
+      legal_status: 'pending'
+    }).select().single();
+
+    btn.disabled = false; btn.textContent = '🏎 Register';
+    if (error) { toast(error.message || 'Failed to register', false); return; }
+
+    // Save locally
+    const list = getMyCars();
+    list.push({ id: data.id, kid_name: name, car_number: num });
+    saveMyCars(list);
+
+    document.getElementById('kidName').value = '';
+    document.getElementById('carNumber').value = '';
+    toast('Car registered!', true);
+    await renderMyCars();
+  });
+
+  // ── My Cars ──────────────────────────────────────────────────
+  async function renderMyCars() {
+    const stored = getMyCars();
+    const card   = document.getElementById('myCarsCard');
+    if (!stored.length) { card.style.display = 'none'; return; }
+    card.style.display = 'block';
+
+    // Fetch current status from DB
+    const ids = stored.map(c => c.id);
+    const { data: dbCars } = await sb.from('cars').select('id, car_number, kid_name, legal_status').in('id', ids);
+    const dbMap = {};
+    (dbCars || []).forEach(c => dbMap[c.id] = c);
+
+    document.getElementById('myCarsList').innerHTML = stored.map(c => {
+      const db = dbMap[c.id] || c;
+      return `
+        <div class="car-card">
+          <div class="car-num">#${db.car_number}</div>
+          <div class="car-info">
+            <div class="car-name">${db.kid_name}</div>
+            <div class="car-status">${badgeHtml(db.legal_status || 'pending')}</div>
+          </div>
+          <div class="car-actions">
+            <button class="btn-sm btn-outline" onclick="openEdit('${c.id}','${db.kid_name.replace(/'/g,"\\'")}')" title="Edit">✏️</button>
+            <button class="btn-sm btn-danger-sm" onclick="removeCar('${c.id}')" title="Remove from this device">✕</button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  function removeCar(id) {
+    const list = getMyCars().filter(c => c.id !== id);
+    saveMyCars(list);
+    renderMyCars();
+  }
+
+  // ── Edit modal ───────────────────────────────────────────────
+  function openEdit(id, name) {
+    editingCarId = id;
+    document.getElementById('editName').value = name;
+    document.getElementById('editModal').classList.add('open');
+    document.getElementById('editName').focus();
+  }
+  function closeEdit() { document.getElementById('editModal').classList.remove('open'); editingCarId = null; }
+  async function saveEdit() {
+    const name = document.getElementById('editName').value.trim();
+    if (!name) { toast('Enter a name', false); return; }
+    const { error } = await sb.from('cars').update({ kid_name: name }).eq('id', editingCarId);
+    if (error) { toast('Update failed', false); return; }
+    const list = getMyCars().map(c => c.id === editingCarId ? { ...c, kid_name: name } : c);
+    saveMyCars(list);
+    closeEdit(); toast('Updated!');
+    await renderMyCars();
+  }
+  document.getElementById('editModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeEdit(); });
+
+  // ── Race status strip ─────────────────────────────────────────
+  async function loadRaceStatus() {
+    const { data: state } = await sb
+      .from('race_state')
+      .select('status, current_round_id, current_heat_id, heats(heat_number, rounds(round_number))')
+      .eq('event_id', eventId).single();
+
+    const dot  = document.getElementById('raceStatusDot');
+    const text = document.getElementById('raceStatusText');
+
+    if (!state || state.status === 'not_started') {
+      dot.style.background = 'var(--muted2)'; text.textContent = 'Registration open'; return;
+    }
+    if (state.status === 'complete') {
+      dot.style.background = '#6b7280'; text.textContent = 'Races complete'; return;
+    }
+    const heat = state.heats; const round = heat?.rounds;
+    dot.style.background = 'var(--success)';
+    dot.style.boxShadow  = '0 0 6px var(--success)';
+    text.textContent = (heat && round) ? `Racing — Round ${round.round_number}, Heat ${heat.heat_number}` : 'Racing';
+  }
+
+  // ── Current heat ──────────────────────────────────────────────
   async function loadCurrentHeat() {
     const { data: state } = await sb
-      .from("race_state")
-      .select("current_heat_id, heats(heat_number, status, rounds(round_number))")
-      .eq("event_id", eventId)
-      .single();
+      .from('race_state')
+      .select('current_heat_id, heats(heat_number, status, rounds(round_number))')
+      .eq('event_id', eventId).single();
 
     const heatId = state?.current_heat_id;
     const heat   = state?.heats;
 
-    if (!heatId || !heat || heat.status !== "active") {
-      document.getElementById("heatBanner").style.display = "none";
-      document.getElementById("laneSection").style.display = "none";
+    if (!heatId || !heat || heat.status !== 'active') {
+      document.getElementById('heatCard').style.display = 'none';
       return;
     }
 
-    const rn = heat.rounds?.round_number ?? "?";
-    const hn = heat.heat_number ?? "?";
+    const rn = heat.rounds?.round_number ?? '?';
+    const hn = heat.heat_number ?? '?';
+    document.getElementById('raceBanner').style.display  = 'none';
+    document.getElementById('heatCard').style.display    = 'block';
+    document.getElementById('heatBanner').innerHTML = `
+      <div class="rb-sub">Now Running</div>
+      <div class="rb-main">Round ${rn} — Heat ${hn}</div>`;
 
-    document.getElementById("heatBanner").style.display = "block";
-    document.getElementById("heatBannerText").textContent = `Round ${rn} — Heat ${hn}`;
-
-    // Lane assignments
     const { data: entries } = await sb
-      .from("heat_entries")
-      .select("lane_number, cars(car_number, kid_name)")
-      .eq("heat_id", heatId)
-      .order("lane_number");
+      .from('heat_entries')
+      .select('lane_number, cars(car_number, kid_name)')
+      .eq('heat_id', heatId).order('lane_number');
 
-    const lanes = {};
-    (entries || []).forEach(e => lanes[e.lane_number] = e.cars);
+    const myIds  = getMyCars().map(c => c.id);
+    const laneMap = {};
+    (entries || []).forEach(e => laneMap[e.lane_number] = e.cars);
 
-    document.getElementById("laneSection").style.display = "block";
-    document.getElementById("laneBoard").innerHTML =
-      Array.from({ length: numLanes }, (_, i) => i + 1).map(l => {
-        const car = lanes[l];
-        return `
-          <div class="lane-card">
-            <div class="lane-label">Lane ${l}</div>
-            <div class="car-number">${car ? car.car_number : "—"}</div>
-            <div class="kid-name">${car ? car.kid_name : ""}</div>
-          </div>`;
-      }).join("");
-  }
-
-  // ── Heat history ─────────────────────────────────────────────
-  async function loadHistory() {
-    const { data: rounds } = await sb
-      .from("rounds")
-      .select("id, round_number, status")
-      .eq("event_id", eventId)
-      .order("round_number");
-
-    const el = document.getElementById("heatHistory");
-    if (!rounds?.length) {
-      el.innerHTML = `<div class="empty-state">No heats yet</div>`;
-      return;
-    }
-
-    let html = "";
-    for (const round of rounds) {
-      const { data: heats } = await sb
-        .from("heats")
-        .select(`id, heat_number, status,
-          heat_results(first_place_car, second_place_car, third_place_car, fourth_place_car),
-          heat_entries(lane_number, cars(car_number, kid_name))`)
-        .eq("round_id", round.id)
-        .order("heat_number");
-
-      html += `<div class="result-heat-header">Round ${round.round_number}</div>`;
-
-      for (const heat of (heats || [])) {
-        const result = heat.heat_results?.[0];
-        if (!result) {
-          heat.heat_entries?.length
-            ? html += `<div class="leaderboard-row"><div class="rank">—</div><div class="name">Heat ${heat.heat_number} — pending</div></div>`
-            : "";
-          continue;
-        }
-
-        // Build finish order
-        const carMap = {};
-        (heat.heat_entries || []).forEach(e => {
-          if (e.cars) carMap[e.cars.car_number] = e.cars.kid_name;
-        });
-
-        // Fetch car numbers for result IDs
-        const carIds = [result.first_place_car, result.second_place_car, result.third_place_car, result.fourth_place_car].filter(Boolean);
-        const { data: finishCars } = await sb
-          .from("cars")
-          .select("id, car_number, kid_name")
-          .in("id", carIds);
-
-        const finishMap = {};
-        (finishCars || []).forEach(c => finishMap[c.id] = c);
-
-        const order = [result.first_place_car, result.second_place_car, result.third_place_car, result.fourth_place_car]
-          .filter(Boolean)
-          .map((id, i) => {
-            const c = finishMap[id];
-            return c ? `<span style="margin-right:10px;">${["🥇","🥈","🥉","4️⃣"][i]} #${c.car_number} ${c.kid_name}</span>` : "";
-          }).join("");
-
-        html += `
-          <div style="padding:10px 0; border-bottom:1px solid var(--border); font-size:0.88rem;">
-            <div style="font-weight:700; color:var(--muted); margin-bottom:4px; font-size:0.72rem; text-transform:uppercase;">Heat ${heat.heat_number}</div>
-            <div style="display:flex; flex-wrap:wrap; gap:4px;">${order}</div>
-          </div>`;
-      }
-    }
-
-    el.innerHTML = html || `<div class="empty-state">No completed heats yet</div>`;
-  }
-
-  // ── Live subscriptions ───────────────────────────────────────
-  function subscribeAll() {
-    // Re-render on any race data change
-    ["heat_results", "race_state", "round_standings"].forEach(table => {
-      subscribeTable(eventId, table, async () => {
-        await Promise.all([loadLeaderboard(), loadCurrentHeat(), loadHistory()]);
-      });
+    const myCarsInHeat = (entries || []).filter(e => {
+      const dbCars = getMyCars();
+      // check if any of the cars in this heat match by kid_name/car_number in our local list
+      return e.cars && dbCars.some(c => c.car_number == e.cars.car_number);
     });
+
+    document.getElementById('laneBoard').innerHTML =
+      Array.from({ length: numLanes }, (_, i) => i + 1).map(l => {
+        const car = laneMap[l];
+        const mycar = getMyCars().find(c => car && c.car_number == car.car_number);
+        const hl = mycar ? ' lane-highlighted' : '';
+        return `
+          <div class="lane-row${hl}">
+            <div class="lane-num">Ln ${l}</div>
+            <div class="lane-car">
+              <div class="lc-name">${car ? car.kid_name : '—'}</div>
+              <div class="lc-num">${car ? '#' + car.car_number : ''}</div>
+            </div>
+          </div>`;
+      }).join('');
+  }
+
+  // ── Live subscriptions ────────────────────────────────────────
+  function startSubscriptions() {
+    sb.channel('parent-cars-' + eventId)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cars' },       () => renderMyCars())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'race_state' }, () => { loadRaceStatus(); loadCurrentHeat(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'heat_results'},() => { loadCurrentHeat(); })
+      .subscribe();
   }
 </script>
-
 </body>
 </html>
+

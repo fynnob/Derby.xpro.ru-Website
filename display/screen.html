@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Derby Screen</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <script src="/frontend/config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="/frontend/lib/router.js"></script>
+  <script src="/frontend/lib/api.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0b0d14; --surface: #131620; --card: #1a1e2e; --border: #252a3d;
+      --amber: #f59e0b; --text: #e8eaf2; --muted: #6b738f;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; height: 100vh; width: 100vw; overflow: hidden; }
+
+    /* Idle / default slide */
+    #slideIdle {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: radial-gradient(ellipse at center, #1a1e2e 0%, var(--bg) 70%);
+      text-align: center; gap: 24px;
+    }
+    #slideIdle .idle-title { font-size: clamp(3rem, 7vw, 8rem); font-weight: 900; letter-spacing: 4px; text-transform: uppercase; color: var(--amber); }
+    #slideIdle .idle-sub { font-size: clamp(1rem, 2vw, 2rem); font-weight: 600; letter-spacing: 6px; text-transform: uppercase; color: var(--muted); }
+
+    /* Generic full-screen slide container */
+    .slide { position: fixed; inset: 0; display: none; }
+    .slide.active { display: block; }
+
+    /* Message slide */
+    #slideMessage {
+      display: none; align-items: center; justify-content: center;
+      padding: 80px;
+    }
+    #slideMessage.active { display: flex; }
+    #slideMessage .msg-inner {
+      max-width: 80%;
+      font-size: clamp(2.5rem, 6vw, 9rem);
+      font-weight: 900;
+      text-align: center;
+      line-height: 1.1;
+      word-break: break-word;
+    }
+
+    /* Timer slide */
+    #slideTimer {
+      display: none; flex-direction: column; align-items: center; justify-content: center; gap: 24px;
+    }
+    #slideTimer.active { display: flex; }
+    #slideTimer .timer-label { font-size: 1.5rem; font-weight: 700; letter-spacing: 6px; text-transform: uppercase; color: var(--muted); }
+    #slideTimer .timer-value { font-size: clamp(6rem, 18vw, 24rem); font-weight: 900; letter-spacing: -4px; line-height: 1; color: var(--amber); font-variant-numeric: tabular-nums; }
+
+    /* Race (iframe) slide */
+    #slideRace {
+      display: none;
+    }
+    #slideRace.active { display: block; }
+    #slideRace iframe { width: 100%; height: 100%; border: none; }
+
+    /* Scoreboard slide */
+    #slideScoreboard {
+      display: none; flex-direction: column; padding: 60px;
+      gap: 24px; overflow: hidden;
+    }
+    #slideScoreboard.active { display: flex; }
+    .sboard-title { font-size: 1.2rem; font-weight: 900; letter-spacing: 6px; text-transform: uppercase; color: var(--amber); }
+    .sboard-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; flex: 1; overflow: hidden; }
+    .sboard-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 20px 28px; display: flex; align-items: center; gap: 16px; }
+    .sboard-rank { font-size: 2rem; font-weight: 900; color: var(--muted); min-width: 40px; }
+    .sboard-info .sboard-name { font-size: 1.5rem; font-weight: 800; }
+    .sboard-info .sboard-num { font-size: 0.85rem; font-weight: 700; color: var(--muted); }
+    .sboard-pts { font-size: 1.2rem; font-weight: 800; color: var(--amber); margin-left: auto; }
+
+    /* Split slide */
+    #slideSplit {
+      display: none; flex-direction: column; padding: 60px; gap: 24px; overflow: hidden;
+    }
+    #slideSplit.active { display: flex; }
+    .split-title { font-size: 1.2rem; font-weight: 900; letter-spacing: 6px; text-transform: uppercase; color: var(--amber); }
+    .split-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; flex: 1; overflow: hidden; }
+    .split-row { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px 28px; display: flex; flex-direction: column; justify-content: center; }
+    .split-heat { font-size: 0.65rem; font-weight: 800; letter-spacing: 4px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+    .split-names { font-size: clamp(1.2rem, 2vw, 2.2rem); font-weight: 800; }
+
+    /* Google Slides */
+    #slideGslides { display: none; }
+    #slideGslides.active { display: block; }
+    #slideGslides iframe { width: 100%; height: 100%; border: none; }
+
+    /* Re-race modal */
+    #reraceModal {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 900;
+      display: none; align-items: center; justify-content: center;
+    }
+    #reraceModal.visible { display: flex; }
+    .rr-inner { background: var(--card); border: 1px solid var(--border); border-radius: 24px; padding: 48px 64px; text-align: center; }
+    .rr-icon { font-size: 4rem; margin-bottom: 16px; }
+    .rr-head { font-size: 2rem; font-weight: 900; color: var(--amber); margin-bottom: 8px; }
+    .rr-body { font-size: 1.1rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+
+<!-- Idle default -->
+<div id="slideIdle">
+  <div class="idle-title" id="idleTitle">Derby</div>
+  <div class="idle-sub" id="idleSub">Race Day Display</div>
+</div>
+
+<!-- Message -->
+<div id="slideMessage" class="slide">
+  <div class="msg-inner" id="msgText">—</div>
+</div>
+
+<!-- Timer -->
+<div id="slideTimer" class="slide">
+  <div class="timer-label" id="timerLabel">Timer</div>
+  <div class="timer-value" id="timerValue">0:00</div>
+</div>
+
+<!-- Race display (iframe) -->
+<div id="slideRace" class="slide">
+  <iframe id="raceFrame" src="about:blank"></iframe>
+</div>
+
+<!-- Scoreboard -->
+<div id="slideScoreboard" class="slide">
+  <div class="sboard-title">🏆 Standings</div>
+  <div class="sboard-grid" id="sboardGrid"></div>
+</div>
+
+<!-- Split (coming up) -->
+<div id="slideSplit" class="slide">
+  <div class="split-title">📋 Coming Up</div>
+  <div class="split-grid" id="splitGrid"></div>
+</div>
+
+<!-- Google Slides -->
+<div id="slideGslides" class="slide">
+  <iframe id="gslidesFrame" src="about:blank" allowfullscreen></iframe>
+</div>
+
+<!-- Re-race modal -->
+<div id="reraceModal">
+  <div class="rr-inner">
+    <div class="rr-icon">⚠️</div>
+    <div class="rr-head">RE-RACE</div>
+    <div class="rr-body" id="reraceBody">A re-race has been called.</div>
+  </div>
+</div>
+
+<script>
+  let eventId, event, ctx;
+  let timerInterval = null;
+  let timerMs = 0;
+  let timerRunning = false;
+  let timerMode = 'countdown'; // 'countdown' | 'stopwatch'
+  let currentSlide = 'idle';
+
+  const SLIDES = {
+    idle:       document.getElementById('slideIdle'),
+    message:    document.getElementById('slideMessage'),
+    timer:      document.getElementById('slideTimer'),
+    race:       document.getElementById('slideRace'),
+    scoreboard: document.getElementById('slideScoreboard'),
+    split:      document.getElementById('slideSplit'),
+    gslides:    document.getElementById('slideGslides'),
+  };
+
+  function showSlide(name) {
+    Object.entries(SLIDES).forEach(([k, el]) => {
+      if (k === 'idle') {
+        el.style.display = (name === 'idle') ? 'flex' : 'none';
+      } else {
+        el.classList.toggle('active', k === name);
+      }
+    });
+    currentSlide = name;
+  }
+
+  function fmtTime(ms) {
+    const totalSec = Math.max(0, Math.round(ms / 1000));
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${s.toString().padStart(2,'0')}`;
+  }
+
+  function tickTimer() {
+    const stepMs = 1000;
+    if (timerMode === 'countdown') {
+      timerMs = Math.max(0, timerMs - stepMs);
+      document.getElementById('timerValue').textContent = fmtTime(timerMs);
+      if (timerMs <= 0) { clearInterval(timerInterval); timerInterval = null; timerRunning = false; }
+    } else {
+      timerMs += stepMs;
+      document.getElementById('timerValue').textContent = fmtTime(timerMs);
+    }
+  }
+
+  async function handlePayload(payload) {
+    const type = payload.type;
+
+    if (type === 'clear') { showSlide('idle'); return; }
+
+    if (type === 'message') {
+      const el = document.getElementById('msgText');
+      el.textContent = payload.text || '';
+      el.style.color = payload.color || '#e8eaf2';
+      showSlide('message');
+      return;
+    }
+
+    if (type === 'timer') {
+      clearInterval(timerInterval); timerInterval = null; timerRunning = false;
+      timerMode = payload.mode || 'countdown';
+      timerMs   = (payload.durationMs != null) ? payload.durationMs : 0;
+      document.getElementById('timerLabel').textContent = payload.label || 'Timer';
+      document.getElementById('timerValue').textContent = fmtTime(timerMs);
+      showSlide('timer');
+      if (payload.running) {
+        timerRunning = true;
+        timerInterval = setInterval(tickTimer, 1000);
+      }
+      return;
+    }
+
+    if (type === 'timerControl') {
+      if (payload.action === 'start' && !timerRunning) {
+        timerRunning = true;
+        timerInterval = setInterval(tickTimer, 1000);
+      } else if (payload.action === 'stop') {
+        clearInterval(timerInterval); timerInterval = null; timerRunning = false;
+      } else if (payload.action === 'reset') {
+        clearInterval(timerInterval); timerInterval = null; timerRunning = false;
+        timerMs = payload.durationMs != null ? payload.durationMs : 0;
+        document.getElementById('timerValue').textContent = fmtTime(timerMs);
+      }
+      return;
+    }
+
+    if (type === 'race') {
+      const frame = document.getElementById('raceFrame');
+      const displayPath = `/frontend/display/${location.hash}`;
+      if (frame.getAttribute('data-src') !== displayPath) {
+        frame.src = displayPath;
+        frame.setAttribute('data-src', displayPath);
+      }
+      showSlide('race');
+      return;
+    }
+
+    if (type === 'register') {
+      const regPath = `/frontend/event/${location.hash}`;
+      document.getElementById('msgText').innerHTML =
+        `<div style="font-size:4rem;margin-bottom:32px;">📱</div>
+         <div style="font-size:clamp(2rem,4vw,6rem);color:var(--amber);">Register Your Car</div>
+         <div style="font-size:clamp(1rem,2vw,2.5rem);color:var(--muted);margin-top:24px;">${location.origin}${regPath}</div>`;
+      document.getElementById('msgText').style.color = '#e8eaf2';
+      showSlide('message');
+      return;
+    }
+
+    if (type === 'scoreboard') {
+      await loadScoreboard();
+      showSlide('scoreboard');
+      return;
+    }
+
+    if (type === 'split') {
+      await loadSplit();
+      showSlide('split');
+      return;
+    }
+
+    if (type === 'gslides') {
+      const frame = document.getElementById('gslidesFrame');
+      if (payload.url) frame.src = payload.url;
+      showSlide('gslides');
+      return;
+    }
+  }
+
+  async function loadScoreboard() {
+    const { data: activeCars } = await sb
+      .from('cars').select('id, car_number, kid_name')
+      .eq('eliminated', false).eq('event_id', eventId);
+    const { data: state } = await sb
+      .from('race_state').select('current_round_id')
+      .eq('event_id', eventId).single();
+    if (!activeCars?.length || !state?.current_round_id) return;
+    const { data: results } = await sb
+      .from('heat_results')
+      .select('first_place_car, second_place_car, third_place_car, fourth_place_car, heats!inner(round_id)')
+      .eq('heats.round_id', state.current_round_id);
+    const pts = {};
+    activeCars.forEach(c => pts[c.id] = 0);
+    (results || []).forEach(r => {
+      if (pts[r.first_place_car]  !== undefined) pts[r.first_place_car]  += 1;
+      if (pts[r.second_place_car] !== undefined) pts[r.second_place_car] += 2;
+      if (pts[r.third_place_car]  !== undefined) pts[r.third_place_car]  += 3;
+      if (pts[r.fourth_place_car] !== undefined) pts[r.fourth_place_car] += 4;
+    });
+    const sorted = activeCars
+      .filter(c => pts[c.id] > 0)
+      .sort((a, b) => pts[a.id] - pts[b.id] || a.car_number - b.car_number)
+      .slice(0, 12);
+    const grid = document.getElementById('sboardGrid');
+    if (!sorted.length) { grid.innerHTML = '<p style="color:var(--muted)">No results yet</p>'; return; }
+    const rankLabel = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th','11th','12th'];
+    grid.innerHTML = sorted.map((c, i) => `
+      <div class="sboard-card">
+        <div class="sboard-rank">${rankLabel[i]}</div>
+        <div class="sboard-info">
+          <div class="sboard-name">${c.kid_name}</div>
+          <div class="sboard-num">Car #${c.car_number}</div>
+        </div>
+        <div class="sboard-pts">${pts[c.id]}</div>
+      </div>`).join('');
+  }
+
+  async function loadSplit() {
+    const { data: state } = await sb
+      .from('race_state').select('current_round_id, current_heat_id')
+      .eq('event_id', eventId).single();
+    if (!state?.current_round_id) return;
+    const { data: heats } = await sb
+      .from('heats').select('id, heat_number, heat_entries(lane_number, cars(car_number, kid_name))')
+      .eq('round_id', state.current_round_id)
+      .order('heat_number').limit(8);
+    const grid = document.getElementById('splitGrid');
+    if (!heats?.length) { grid.innerHTML = '<p style="color:var(--muted)">No heats found</p>'; return; }
+    grid.innerHTML = heats.map(h => {
+      const entries = (h.heat_entries || []).sort((a, b) => a.lane_number - b.lane_number);
+      const names = entries.map(e => `<span>${e.cars?.kid_name ?? '—'}</span>`).join(' · ');
+      return `<div class="split-row">
+        <div class="split-heat">Heat ${h.heat_number}${h.id === state.current_heat_id ? ' — ON TRACK' : ''}</div>
+        <div class="split-names">${names || '—'}</div>
+      </div>`;
+    }).join('');
+  }
+
+  (async () => {
+    try {
+      ({ ctx, event, eventId } = await initPage());
+    } catch (e) { return; }
+
+    document.title = event.name + ' — Screen';
+    document.getElementById('idleTitle').textContent = event.track_name || event.name;
+    document.getElementById('idleSub').textContent   = event.name + ' · Race Day';
+
+    sb.channel('announcer-control-' + eventId)
+      .on('broadcast', { event: 'slide' }, ({ payload }) => handlePayload(payload))
+      .subscribe();
+
+    sb.channel('rerace-control-' + eventId)
+      .on('broadcast', { event: 'rerace' }, ({ payload }) => {
+        const modal = document.getElementById('reraceModal');
+        document.getElementById('reraceBody').textContent =
+          payload.reason ? `Reason: ${payload.reason}` : 'A re-race has been called.';
+        modal.classList.add('visible');
+        setTimeout(() => modal.classList.remove('visible'), 8000);
+      })
+      .subscribe();
+  })();
+</script>
+</body>
+</html>
