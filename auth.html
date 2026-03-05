@@ -37,7 +37,6 @@
         Send Magic Link →
       </button>
       <p style="font-size:0.78rem; color:var(--muted2); margin-top:16px; text-align:center;">
-        First time? An account is created automatically.<br>
         <a href="/">Learn about DerbySystem</a>
       </p>
     </div>
@@ -87,9 +86,14 @@
     btn.disabled = true;
     btn.textContent = "Sending…";
 
-    const { error } = await sendMagicLink(email);
-    if (error) {
-      document.getElementById("emailErr").textContent = error.message;
+    let result;
+    try {
+      result = await sendMagicLink(email);
+    } catch (err) {
+      result = { error: { message: err.message || "Unknown error" } };
+    }
+    if (result.error) {
+      document.getElementById("emailErr").textContent = result.error.message;
       btn.disabled = false;
       btn.textContent = "Send Magic Link →";
       return;
