@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Derby Screen</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
-  <script src="/frontend/config.js"></script>
+  <script src="/DerbySystem/config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-  <script src="/frontend/lib/router.js"></script>
-  <script src="/frontend/lib/api.js"></script>
+  <script src="/DerbySystem/lib/router.js"></script>
+  <script src="/DerbySystem/lib/api.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -244,7 +244,7 @@
 
     if (type === 'race') {
       const frame = document.getElementById('raceFrame');
-      const displayPath = `/frontend/display/${location.hash}`;
+      const displayPath = `/DerbySystem/display/${location.hash}`;
       if (frame.getAttribute('data-src') !== displayPath) {
         frame.src = displayPath;
         frame.setAttribute('data-src', displayPath);
@@ -254,7 +254,7 @@
     }
 
     if (type === 'register') {
-      const regPath = `/frontend/event/${location.hash}`;
+      const regPath = `/DerbySystem/event/${location.hash}`;
       document.getElementById('msgText').innerHTML =
         `<div style="font-size:4rem;margin-bottom:32px;">📱</div>
          <div style="font-size:clamp(2rem,4vw,6rem);color:var(--amber);">Register Your Car</div>

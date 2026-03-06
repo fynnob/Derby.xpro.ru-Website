@@ -4,12 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Admin Hub — DerbySystem</title>
-  <link rel="stylesheet" href="/frontend/styles.css" />
-  <script src="/frontend/config.js"></script>
+  <link rel="stylesheet" href="/DerbySystem/styles.css" />
+  <script src="/DerbySystem/config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-  <script src="/frontend/lib/router.js"></script>
-  <script src="/frontend/lib/api.js"></script>
-  <script src="/frontend/lib/admin.js"></script>
+  <script src="/DerbySystem/lib/router.js"></script>
+  <script src="/DerbySystem/lib/api.js"></script>
+  <script src="/DerbySystem/lib/admin.js"></script>
 </head>
 <body>
 
@@ -71,12 +71,12 @@
     // Build station grid with hash context
     const hash = `#/${ctx.org}/${ctx.name}`;
     document.getElementById("stationGrid").innerHTML = [
-      { href: `/frontend/admin/inspection.html${hash}`, icon: "🔍", title: "Inspection",   desc: "Scan QR, approve / reject cars" },
-      { href: `/frontend/admin/track.html${hash}`,      icon: "🛤️", title: "Track",        desc: "Browse lane assignments for each heat" },
-      { href: `/frontend/admin/results.html${hash}`,    icon: "🏁", title: "Race Officials",desc: "Heat control, results entry, round management" },
-      { href: `/frontend/admin/cars.html${hash}`,       icon: "🚗", title: "Cars",          desc: "View and edit all registered cars" },
-      { href: `/frontend/admin/announcer.html${hash}`,  icon: "📺", title: "Screen",        desc: "Control the announcer display" },
-      { href: `/frontend/display/index.html${hash}`,    icon: "🖥️", title: "Display",       desc: "Open the race day display board" },
+      { href: `/DerbySystem/admin/inspection.html${hash}`, icon: "🔍", title: "Inspection",   desc: "Scan QR, approve / reject cars" },
+      { href: `/DerbySystem/admin/track.html${hash}`,      icon: "🛤️", title: "Track",        desc: "Browse lane assignments for each heat" },
+      { href: `/DerbySystem/admin/results.html${hash}`,    icon: "🏁", title: "Race Officials",desc: "Heat control, results entry, round management" },
+      { href: `/DerbySystem/admin/cars.html${hash}`,       icon: "🚗", title: "Cars",          desc: "View and edit all registered cars" },
+      { href: `/DerbySystem/admin/announcer.html${hash}`,  icon: "📺", title: "Screen",        desc: "Control the announcer display" },
+      { href: `/DerbySystem/display/index.html${hash}`,    icon: "🖥️", title: "Display",       desc: "Open the race day display board" },
     ].map(s => `
       <a href="${s.href}" class="station-card">
         <span class="icon">${s.icon}</span>
