@@ -71,12 +71,12 @@
     // Build station grid with hash context
     const hash = `#/${ctx.org}/${ctx.name}`;
     document.getElementById("stationGrid").innerHTML = [
-      { href: `/DerbySystem/admin/inspection.html${hash}`, icon: "🔍", title: "Inspection",   desc: "Scan QR, approve / reject cars" },
-      { href: `/DerbySystem/admin/track.html${hash}`,      icon: "🛤️", title: "Track",        desc: "Browse lane assignments for each heat" },
-      { href: `/DerbySystem/admin/results.html${hash}`,    icon: "🏁", title: "Race Officials",desc: "Heat control, results entry, round management" },
-      { href: `/DerbySystem/admin/cars.html${hash}`,       icon: "🚗", title: "Cars",          desc: "View and edit all registered cars" },
-      { href: `/DerbySystem/admin/announcer.html${hash}`,  icon: "📺", title: "Screen",        desc: "Control the announcer display" },
-      { href: `/DerbySystem/display/index.html${hash}`,    icon: "🖥️", title: "Display",       desc: "Open the race day display board" },
+      { href: `/DerbySystem/admin/inspection${hash}`, icon: "🔍", title: "Inspection",   desc: "Scan QR, approve / reject cars" },
+      { href: `/DerbySystem/admin/track${hash}`,      icon: "🛤️", title: "Track",        desc: "Browse lane assignments for each heat" },
+      { href: `/DerbySystem/admin/results${hash}`,    icon: "🏁", title: "Race Officials",desc: "Heat control, results entry, round management" },
+      { href: `/DerbySystem/admin/cars${hash}`,       icon: "🚗", title: "Cars",          desc: "View and edit all registered cars" },
+      { href: `/DerbySystem/admin/announcer${hash}`,  icon: "📺", title: "Screen",        desc: "Control the announcer display" },
+      { href: `/DerbySystem/display/index${hash}`,    icon: "🖥️", title: "Display",       desc: "Open the race day display board" },
     ].map(s => `
       <a href="${s.href}" class="station-card">
         <span class="icon">${s.icon}</span>

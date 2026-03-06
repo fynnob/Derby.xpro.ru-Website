@@ -208,7 +208,7 @@
     document.getElementById('navLinks').innerHTML   = buildAdminNav(ctx, 'announcer');
 
     const hash = `#/${ctx.org}/${ctx.name}`;
-    screenUrl   = `${location.origin}/DerbySystem/display/screen.html${hash}`;
+    screenUrl   = `${location.origin}/DerbySystem/display${hash}`;
     regUrl      = `${location.origin}/DerbySystem/event/${hash}`;
     document.getElementById('openScreenLink').href = screenUrl;
   })();
