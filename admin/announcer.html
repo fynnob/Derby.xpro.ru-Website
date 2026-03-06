@@ -175,20 +175,43 @@
   <div id="tab-slides" class="tab-panel">
     <div class="card">
       <div class="card-title">📽 Google Slides</div>
-      <p style="font-size:0.82rem; color:var(--muted2); margin-bottom:6px; line-height:1.5;">
-        Paste the <code>&lt;iframe&gt;</code> HTML from Google Slides or just the <code>src="…"</code> URL.
+      <p style="font-size:0.82rem; color:var(--muted2); margin-bottom:10px; line-height:1.5;">
+        Paste the share URL from Google Slides (<em>Share → Copy link</em> or the
+        full browser URL). The link is auto-converted to a full-screen embed.
       </p>
-      <textarea id="gSlidesUrl" rows="4"
-        placeholder='Paste <iframe ...> or just the URL'
-        style="width:100%; font-size:0.78rem; font-family:monospace; resize:vertical; margin-bottom:12px;"></textarea>
+      <textarea id="gSlidesUrl" rows="3"
+        placeholder='https://docs.google.com/presentation/d/…/edit'
+        style="width:100%; font-size:0.82rem; font-family:monospace; resize:vertical; margin-bottom:8px;"></textarea>
+
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap;">
+        <label style="margin:0; text-transform:none; font-size:0.85rem; font-weight:600; color:var(--text2); white-space:nowrap;">
+          Auto-advance every
+        </label>
+        <select id="gSlidesDelay" style="width:auto; margin:0; flex:1; min-width:120px;">
+          <option value="0">Off (manual)</option>
+          <option value="5000">5 seconds</option>
+          <option value="10000" selected>10 seconds</option>
+          <option value="20000">20 seconds</option>
+          <option value="30000">30 seconds</option>
+          <option value="60000">1 minute</option>
+        </select>
+        <label style="margin:0; text-transform:none; font-size:0.85rem; font-weight:600; color:var(--text2);">
+          <input type="checkbox" id="gSlidesLoop" style="width:auto; margin:0 4px 0 0; display:inline;" /> Loop
+        </label>
+      </div>
+
       <button class="btn btn-primary btn-full" onclick="pushGSlides()">▶ Show on Screen</button>
+
       <div id="gSlidesNav" style="display:none; margin-top:16px;">
-        <div class="card-title" style="margin-bottom:10px; font-size:0.75rem;">Slide Navigation</div>
+        <div class="card-title" style="margin-bottom:10px; font-size:0.75rem;">Manual Navigation</div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
           <button class="btn" onclick="navGSlides('prev')">← Prev Slide</button>
           <button class="btn" onclick="navGSlides('next')">Next Slide →</button>
         </div>
         <div id="gSlidesCounter" style="text-align:center; font-size:0.8rem; color:var(--muted); margin-top:8px;">Slide 1</div>
+        <p style="font-size:0.75rem; color:var(--muted2); margin-top:8px; text-align:center;">
+          Manual navigation reloads the slide — a 1-2 second blank flash is normal.
+        </p>
       </div>
     </div>
   </div>
@@ -278,17 +301,32 @@
   }
 
   let _localSlidesIndex = 1;
-  function pushGSlides() {
-    let raw = document.getElementById('gSlidesUrl').value.trim();
-    if (!raw) { toast('Paste the Google Slides iframe or URL first.', false); return; }
+
+  function toGSlidesEmbed(raw) {
+    // Extract from <iframe src="..."> if pasted as HTML
     const srcMatch = raw.match(/src="([^"]+)"/);
     if (srcMatch) raw = srcMatch[1];
-    const base = raw.replace(/[&?]slide=\d+/, '');
+    // If it's a recognisable Google Slides URL, convert to embed format
+    const idMatch = raw.match(/presentation\/d\/([a-zA-Z0-9_-]+)/);
+    if (idMatch) {
+      const id      = idMatch[1];
+      const delay   = document.getElementById('gSlidesDelay').value;
+      const loop    = document.getElementById('gSlidesLoop').checked ? 'true' : 'false';
+      return `https://docs.google.com/presentation/d/${id}/embed?start=${delay !== '0'}&loop=${loop}&delayms=${delay}&rm=minimal`;
+    }
+    return raw; // not a Google Slides URL — use as-is
+  }
+
+  function pushGSlides() {
+    const raw = document.getElementById('gSlidesUrl').value.trim();
+    if (!raw) { toast('Paste a Google Slides URL first.', false); return; }
+    const url = toGSlidesEmbed(raw);
     _localSlidesIndex = 1;
-    pushSlide({ type: 'gslides', url: base });
+    pushSlide({ type: 'gslides', url });
     document.getElementById('gSlidesNav').style.display = '';
     document.getElementById('gSlidesCounter').textContent = 'Slide 1';
   }
+
   async function navGSlides(dir) {
     if (dir === 'next') _localSlidesIndex++;
     if (dir === 'prev') _localSlidesIndex = Math.max(1, _localSlidesIndex - 1);
@@ -296,7 +334,7 @@
     c.send({ type: 'broadcast', event: 'slide', payload: { type: 'gslides-nav', dir } });
     document.getElementById('gSlidesCounter').textContent = `Slide ${_localSlidesIndex}`;
     setNowShowing('gslides', `Slide ${_localSlidesIndex}`);
-    toast('Navigated!');
+    toast('Navigating…');
   }
 
   let _scrollTimer = null;

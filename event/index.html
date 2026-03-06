@@ -23,15 +23,6 @@
     <input type="text" id="kidName" placeholder="e.g. Alex Johnson" maxlength="80"
            autocomplete="off" autocapitalize="words" />
 
-    <label for="carImage">Car Photo <span style="color:var(--accent); font-weight:600;">(recommended)</span></label>
-    <input type="file" id="carImage" accept="image/*" capture="environment" />
-    <p style="font-size:0.78rem; color:var(--muted2); margin-top:-8px; margin-bottom:12px;">Tapping this opens your camera so you can take a new photo right now — no file browsing needed.</p>
-
-    <div id="imagePreviewWrap" style="display:none; margin-bottom:14px;">
-      <img id="imagePreview" src="" alt="preview"
-           style="max-height:160px; border-radius:10px; border:1px solid var(--border); display:block;" />
-    </div>
-
     <button class="btn btn-gold btn-lg btn-full" id="registerBtn">
       ➕ Register Car
     </button>
@@ -59,12 +50,6 @@
     <div style="font-size:0.75rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:12px;">Edit Car</div>
     <label for="editKidName">Racer's Name</label>
     <input type="text" id="editKidName" placeholder="Racer's name" maxlength="80" autocapitalize="words" />
-    <label for="editCarImage" style="margin-top:12px;">Replace Photo <span style="color:var(--muted2); font-weight:400;">(optional)</span></label>
-    <input type="file" id="editCarImage" accept="image/*" capture="environment" />
-    <p style="font-size:0.78rem; color:var(--muted2); margin-top:-8px; margin-bottom:12px;">Opens camera — leave empty to keep existing photo.</p>
-    <div id="editPreviewWrap" style="display:none; margin-bottom:14px;">
-      <img id="editPreview" src="" alt="preview" style="max-height:120px; border-radius:10px; border:1px solid var(--border); display:block;" />
-    </div>
     <button class="btn btn-gold btn-full" id="editSaveBtn" onclick="saveCarEdit()">Save Changes</button>
     <button class="btn btn-ghost btn-full" style="margin-top:8px;" onclick="closeEditModal()">Cancel</button>
   </div>
@@ -184,17 +169,11 @@
   }
 
   // ── Image preview ─────────────────────────────────────────────
-  document.getElementById('carImage').addEventListener('change', function () {
-    const file = this.files[0]; if (!file) return;
-    document.getElementById('imagePreview').src = URL.createObjectURL(file);
-    document.getElementById('imagePreviewWrap').style.display = 'block';
-  });
+  // (Photos disabled — no image upload)
 
   // ── Register ──────────────────────────────────────────────────
   document.getElementById('registerBtn').addEventListener('click', async () => {
     const kidName     = document.getElementById('kidName').value.trim();
-    const fileEl      = document.getElementById('carImage');
-    const file        = fileEl.files[0];
     const deviceToken = getDeviceToken();
 
     if (!kidName) { toast("Enter the racer's name first.", false); return; }
@@ -205,22 +184,10 @@
     btn.innerHTML = '<span class="spinner"></span> Registering…';
 
     try {
-      let imageUrl = null;
-
-      if (file) {
-        const ext      = file.name.split('.').pop();
-        const fileName = `car_${Date.now()}.${ext}`;
-        const { error: upErr } = await sb.storage
-          .from('car-images')
-          .upload(fileName, file, { contentType: file.type, upsert: false });
-        if (upErr) throw upErr;
-        imageUrl = sb.storage.from('car-images').getPublicUrl(fileName).data.publicUrl;
-      }
-
       // event_id scopes this car to the current event
       const { data: car, error: carErr } = await sb
         .from('cars')
-        .insert({ kid_name: kidName, image_url: imageUrl, device_token: deviceToken, event_id: eventId })
+        .insert({ kid_name: kidName, device_token: deviceToken, event_id: eventId })
         .select()
         .single();
 
@@ -231,8 +198,6 @@
       renderDeviceQR();
 
       document.getElementById('kidName').value = '';
-      fileEl.value = '';
-      document.getElementById('imagePreviewWrap').style.display = 'none';
 
       toast(`Car #${car.car_number} registered! 🏁`);
 
@@ -312,9 +277,6 @@
 
     el.innerHTML = list.map(car => `
       <div class="car-list-item">
-        <img src="${car.image_url || ''}"
-             onerror="this.style.display='none'"
-             alt="${car.kid_name}" />
         <div class="info">
           <div class="num">#${car.car_number}</div>
           <div class="name">${car.kid_name}</div>
@@ -353,16 +315,8 @@
     const car = getMyCars().find(c => c.id === carId);
     if (!car) return;
     document.getElementById('editKidName').value = car.kid_name;
-    document.getElementById('editCarImage').value = '';
-    document.getElementById('editPreviewWrap').style.display = 'none';
     document.getElementById('editModal').classList.add('open');
   }
-
-  document.getElementById('editCarImage').addEventListener('change', function () {
-    const file = this.files[0]; if (!file) return;
-    document.getElementById('editPreview').src = URL.createObjectURL(file);
-    document.getElementById('editPreviewWrap').style.display = 'block';
-  });
 
   function closeEditModal(e) {
     if (!e || e.target.id === 'editModal' || e.target.tagName === 'BUTTON') {
@@ -378,23 +332,10 @@
     btn.disabled = true; btn.textContent = 'Saving…';
 
     try {
-      const fileEl = document.getElementById('editCarImage');
-      const file   = fileEl.files[0];
-      let patch = { kid_name: newName };
-
-      if (file) {
-        const ext      = file.name.split('.').pop();
-        const fileName = `car_${Date.now()}.${ext}`;
-        const { error: upErr } = await sb.storage.from('car-images')
-          .upload(fileName, file, { contentType: file.type, upsert: false });
-        if (upErr) throw upErr;
-        patch.image_url = sb.storage.from('car-images').getPublicUrl(fileName).data.publicUrl;
-      }
-
-      const { error } = await sb.from('cars').update(patch).eq('id', _editCarId);
+      const { error } = await sb.from('cars').update({ kid_name: newName }).eq('id', _editCarId);
       if (error) throw error;
 
-      const list = getMyCars().map(c => c.id === _editCarId ? { ...c, ...patch } : c);
+      const list = getMyCars().map(c => c.id === _editCarId ? { ...c, kid_name: newName } : c);
       localStorage.setItem(STORE_KEY, JSON.stringify(list));
       renderCarList();
       document.getElementById('editModal').classList.remove('open');

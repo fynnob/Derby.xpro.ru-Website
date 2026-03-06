@@ -89,7 +89,10 @@
     /* Google Slides */
     #slideGslides { display: none; }
     #slideGslides.active { display: block; }
-    #slideGslides iframe { width: 100%; height: 100%; border: none; }
+    #slideGslides iframe { width: 100%; height: 100%; border: none; display: block; }
+
+    /* Message slide — full-color background support */
+    #slideMessage { transition: background 0.3s; }
 
     /* Re-race modal */
     #reraceModal {
@@ -160,6 +163,8 @@
   let timerRunning = false;
   let timerMode = 'countdown'; // 'countdown' | 'stopwatch'
   let currentSlide = 'idle';
+  let _gSlidesBase = null;
+  let _gSlidesPage = 1;
 
   const SLIDES = {
     idle:       document.getElementById('slideIdle'),
@@ -204,27 +209,54 @@
   async function handlePayload(payload) {
     const type = payload.type;
 
-    if (type === 'clear') { showSlide('idle'); return; }
+    if (type === 'clear' || type === 'idle') { showSlide('idle'); return; }
 
-    if (type === 'message') {
+    if (type === 'message' || type === 'text') {
       const el = document.getElementById('msgText');
-      el.textContent = payload.text || '';
+      el.style.background = '';
       el.style.color = payload.color || '#e8eaf2';
+      let html = `<div>${payload.message || payload.text || ''}</div>`;
+      if (payload.subtitle) html += `<div style="font-size:0.45em;font-weight:500;opacity:0.7;margin-top:0.4em">${payload.subtitle}</div>`;
+      el.innerHTML = html;
+      document.getElementById('slideMessage').style.background = '';
+      showSlide('message');
+      return;
+    }
+
+    if (type === 'color-text') {
+      const el = document.getElementById('msgText');
+      document.getElementById('slideMessage').style.background = payload.bg || '#1a56db';
+      el.style.color = payload.color || '#ffffff';
+      let html = `<div>${payload.message || ''}</div>`;
+      if (payload.subtitle) html += `<div style="font-size:0.45em;font-weight:500;opacity:0.85;margin-top:0.4em">${payload.subtitle}</div>`;
+      el.innerHTML = html;
       showSlide('message');
       return;
     }
 
     if (type === 'timer') {
       clearInterval(timerInterval); timerInterval = null; timerRunning = false;
-      timerMode = payload.mode || 'countdown';
-      timerMs   = (payload.durationMs != null) ? payload.durationMs : 0;
+      timerMode = 'countdown';
+      timerMs   = payload.durationMs != null ? payload.durationMs
+                : payload.seconds   != null ? payload.seconds * 1000
+                : 0;
       document.getElementById('timerLabel').textContent = payload.label || 'Timer';
       document.getElementById('timerValue').textContent = fmtTime(timerMs);
       showSlide('timer');
-      if (payload.running) {
-        timerRunning = true;
-        timerInterval = setInterval(tickTimer, 1000);
-      }
+      timerRunning = true;
+      timerInterval = setInterval(tickTimer, 1000);
+      return;
+    }
+
+    if (type === 'stopwatch') {
+      clearInterval(timerInterval); timerInterval = null;
+      timerMode = 'stopwatch';
+      timerMs = 0;
+      document.getElementById('timerLabel').textContent = 'Elapsed';
+      document.getElementById('timerValue').textContent = '0:00';
+      showSlide('timer');
+      timerRunning = true;
+      timerInterval = setInterval(tickTimer, 1000);
       return;
     }
 
@@ -278,8 +310,23 @@
 
     if (type === 'gslides') {
       const frame = document.getElementById('gslidesFrame');
-      if (payload.url) frame.src = payload.url;
+      if (payload.url) {
+        _gSlidesBase = payload.url.replace(/[?&]slide=[^&]*/g, '');
+        frame.src = _gSlidesBase;
+      }
       showSlide('gslides');
+      return;
+    }
+
+    if (type === 'gslides-nav') {
+      // Reload the iframe to the next/prev slide via URL param
+      const frame = document.getElementById('gslidesFrame');
+      if (payload.dir === 'next') _gSlidesPage++;
+      if (payload.dir === 'prev') _gSlidesPage = Math.max(1, _gSlidesPage - 1);
+      if (_gSlidesBase) {
+        const sep = _gSlidesBase.includes('?') ? '&' : '?';
+        frame.src = `${_gSlidesBase}${sep}slide=p${_gSlidesPage}`;
+      }
       return;
     }
   }

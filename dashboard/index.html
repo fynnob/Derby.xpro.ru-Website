@@ -199,8 +199,8 @@
 
     el.innerHTML = events.map(ev => {
       const org  = ev.orgs;
-      const adminUrl  = `/DerbySystem/admin/#/${org.org_type}/${org.org_name}`;
-      const eventUrl  = `/DerbySystem/event/#/${org.org_type}/${org.org_name}`;
+      const adminUrl  = `/DerbySystem/admin#/${org.org_type}/${org.org_name}`;
+      const eventUrl  = `/DerbySystem/event#/${org.org_type}/${org.org_name}`;
       const statusBadge = ev.status === 'active'
         ? `<span class="badge badge-active">Active</span>`
         : `<span class="badge badge-completed">Archived</span>`;
