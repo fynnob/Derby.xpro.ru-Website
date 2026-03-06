@@ -72,8 +72,10 @@
 
   <!-- Manual lookup -->
   <div style="position:fixed;bottom:14px;left:14px;z-index:50;display:flex;gap:8px;">
-    <input type="text" id="tokenInput" placeholder="Car # or name…"
-           style="width:160px;margin:0;padding:8px 12px;font-size:0.82rem;border-radius:100px;background:rgba(0,0,0,.7);border:1px solid #444;color:#fff;backdrop-filter:blur(8px);" />
+    <input type="text" id="tokenInput" placeholder="ABTC / #7 / name…"
+           autocomplete="off" autocapitalize="characters"
+           onkeydown="if(event.key==='Enter') manualLookup()"
+           style="width:170px;margin:0;padding:8px 12px;font-size:0.82rem;border-radius:100px;background:rgba(0,0,0,.7);border:1px solid #444;color:#fff;backdrop-filter:blur(8px);" />
     <button onclick="manualLookup()" style="background:rgba(0,0,0,.7);backdrop-filter:blur(8px);color:#fff;border:1px solid #444;border-radius:100px;padding:8px 14px;font-size:0.82rem;font-weight:700;cursor:pointer;">Go</button>
   </div>
 
@@ -155,25 +157,52 @@
   }
 
   async function manualLookup() {
-    const raw = document.getElementById("tokenInput").value.trim();
+    const raw = document.getElementById("tokenInput").value.trim().toUpperCase();
     if (!raw) return;
 
-    let query = sb.from("cars").select("*").eq("event_id", eventId);
+    // ── Short code: 4 uppercase letters (e.g. "ABTC") ──────────
+    // Can't reverse-hash, so fetch all event cars, hash each unique
+    // device_token, and find the one whose code matches.
+    if (/^[A-Z]{4}$/.test(raw)) {
+      const { data: allCars } = await sb
+        .from("cars").select("*").eq("event_id", eventId);
+      if (!allCars?.length) { toast("No cars registered yet", false); return; }
 
-    const asNum = parseInt(raw, 10);
-    if (!isNaN(asNum) && String(asNum) === raw) {
-      // Numeric — look up by car number
-      query = query.eq("car_number", asNum);
-    } else {
-      // Text — look up by name (case-insensitive contains)
-      query = query.ilike("kid_name", `%${raw}%`);
-    }
+      // Group by device_token
+      const byToken = {};
+      for (const car of allCars) {
+        if (!byToken[car.device_token]) byToken[car.device_token] = [];
+        byToken[car.device_token].push(car);
+      }
 
-    const { data: cars, error } = await query;
-    if (error || !cars?.length) {
-      toast("No cars found for \"" + raw + "\"", false);
+      // Find token whose short code matches
+      const matchToken = Object.keys(byToken).find(
+        t => tokenToShortCode(t) === raw
+      );
+
+      if (!matchToken) { toast(`No family found for code "${raw}"`, false); return; }
+      showFamily(byToken[matchToken], matchToken);
+      document.getElementById("tokenInput").value = "";
       return;
     }
+
+    // ── Car number: pure integer ────────────────────────────────
+    const asNum = parseInt(raw, 10);
+    if (!isNaN(asNum) && String(asNum) === raw) {
+      const { data: cars, error } = await sb
+        .from("cars").select("*")
+        .eq("event_id", eventId).eq("car_number", asNum);
+      if (error || !cars?.length) { toast(`No car #${asNum} found`, false); return; }
+      showFamily(cars, null);
+      document.getElementById("tokenInput").value = "";
+      return;
+    }
+
+    // ── Name: case-insensitive contains match ───────────────────
+    const { data: cars, error } = await sb
+      .from("cars").select("*")
+      .eq("event_id", eventId).ilike("kid_name", `%${raw}%`);
+    if (error || !cars?.length) { toast(`No cars found for "${raw}"`, false); return; }
     showFamily(cars, null);
     document.getElementById("tokenInput").value = "";
   }

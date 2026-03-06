@@ -239,22 +239,6 @@
     document.getElementById('qrModal').classList.add('open');
   }
 
-  function tokenToShortCode(token) {
-    let hash = 0;
-    for (let i = 0; i < token.length; i++) {
-      hash = ((hash << 5) - hash) + token.charCodeAt(i);
-      hash |= 0;
-    }
-    hash = Math.abs(hash);
-    const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-    let code = '';
-    for (let i = 0; i < 4; i++) {
-      code += letters[hash % letters.length];
-      hash = Math.floor(hash / letters.length);
-    }
-    return code;
-  }
-
   function closeQR(e) {
     if (!e || e.target.id === 'qrModal' || e.target.tagName === 'BUTTON') {
       document.getElementById('qrModal').classList.remove('open');
