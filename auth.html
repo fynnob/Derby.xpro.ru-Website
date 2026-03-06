@@ -46,10 +46,9 @@
       <div class="card-title">Enter your code</div>
       <p id="codeMsg" style="margin-bottom:20px; font-size:0.88rem;"></p>
       <label for="codeInput">6-digit code</label>
-      <input type="text" id="codeInput" placeholder="123456"
+      <input type="text" id="codeInput" placeholder="· · · · · ·"
              autocomplete="one-time-code" inputmode="numeric"
-             maxlength="6" pattern="[0-9]{6}"
-             style="font-size:1.6rem; letter-spacing:0.3em; text-align:center;"
+             maxlength="6" pattern="[0-9]{6}" class="input-otp"
              onkeydown="if(event.key==='Enter') doVerify()" />
       <p id="codeErr" style="color:var(--danger); font-size:0.82rem; min-height:1.2em; margin-top:-8px; margin-bottom:12px;"></p>
       <button class="btn btn-primary btn-lg btn-full" id="verifyBtn" onclick="doVerify()">
