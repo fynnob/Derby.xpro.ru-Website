@@ -13,7 +13,7 @@
 </head>
 <body>
 
-<div id="pinGate" style="position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;align-items:center;justify-content:center;">
+<div id="pinGate" style="position:fixed;inset:0;z-index:9999;background:var(--bg);display:none;align-items:center;justify-content:center;">
   <div style="text-align:center;max-width:300px;padding:20px;">
     <h2 style="margin-bottom:8px;">Admin Access</h2>
     <p style="margin-bottom:16px;">Enter the 4-digit PIN</p>
@@ -73,8 +73,14 @@
     </div>
 
     <div id="noHeatMsg" style="display:none;">
-      <div class="empty-state">No active heat — start a round from the Hub first.</div>
+      <div class="empty-state">No active heat — start a round below.</div>
     </div>
+  </div>
+
+  <!-- ── Round Management ────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-title">Round Management</div>
+    <div id="roundMgmt"><span class="spinner"></span></div>
   </div>
 
   <!-- ── Standings ─────────────────────────────────────────── -->
@@ -115,10 +121,10 @@
     document.getElementById("navBrand").textContent = "🏁 " + (event.track_name || "Derby");
     document.getElementById("navLinks").innerHTML   = buildAdminNav(ctx, "results");
 
-    await loadPage();
-    subscribeTable(eventId, "race_state",   loadPage);
+    await Promise.all([loadPage(), loadRoundMgmt()]);
+    subscribeTable(eventId, "race_state",   () => { loadPage(); loadRoundMgmt(); });
     subscribeTable(eventId, "heat_results", loadPage);
-    subscribeTable(eventId, "rounds",       loadStandings);
+    subscribeTable(eventId, "rounds",       () => { loadStandings(); loadRoundMgmt(); });
   })();
 
   function setMode(mode) {
@@ -332,7 +338,7 @@
       await sb.from("race_state")
         .update({ current_heat_id: null, updated_at: new Date().toISOString() })
         .eq("event_id", eventId);
-      toast("All heats complete — close round from Hub");
+      toast("All heats complete — close the round below");
     }
     await loadPage();
   }
@@ -355,6 +361,167 @@
     closeRerace();
     toast("Heat reset — ready to re-run");
     await loadPage();
+  }
+
+  // ── Round Management ─────────────────────────────────────────
+  async function loadRoundMgmt() {
+    const { data: rounds } = await sb
+      .from("rounds")
+      .select("id, round_number, status, advance_count")
+      .eq("event_id", eventId)
+      .order("round_number");
+
+    const el = document.getElementById("roundMgmt");
+    const activeRound = rounds?.find(r => r.status === "active");
+
+    let html = "";
+    if (rounds?.length) {
+      html += rounds.map(r => {
+        const badge = r.status === "active"
+          ? `<span class="badge badge-active">Active</span>`
+          : r.status === "completed"
+          ? `<span class="badge badge-completed">Done</span>`
+          : `<span class="badge badge-pending">Pending</span>`;
+        const advLabel = r.advance_count > 0
+          ? `<span style="font-size:0.75rem; color:var(--muted);">→ top ${r.advance_count} advance</span>`
+          : "";
+        return `<div style="display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--border);">
+          <div style="flex:1; font-weight:700;">Round ${r.round_number} ${advLabel}</div>
+          ${badge}
+          ${r.status === "active" ? `<button class="btn btn-ghost btn-sm" onclick="closeRound('${r.id}')">Close Round</button>` : ""}
+        </div>`;
+      }).join("");
+    } else {
+      html = `<div class="empty-state" style="margin-bottom:4px;">No rounds yet — start one to begin the race.</div>`;
+    }
+
+    if (!activeRound) {
+      html += `<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:14px;">
+        <label style="font-size:0.85rem; color:var(--muted);">Cars advancing to next round:</label>
+        <input type="number" id="advanceCount" min="0" max="99" value="4"
+               style="width:70px; padding:6px 8px; border:1px solid var(--border); border-radius:6px; font-size:0.9rem;" />
+        <span style="font-size:0.72rem; color:var(--muted2);">(0&#xA0;=&#xA0;keep all)</span>
+        <button class="btn btn-primary btn-sm" onclick="startRound()">+ Start New Round</button>
+      </div>`;
+    } else {
+      html += `<p style="margin-top:12px; font-size:0.82rem; color:var(--muted);">Close the current round to start a new one.</p>`;
+    }
+    el.innerHTML = html;
+  }
+
+  async function startRound() {
+    const advanceInput = document.getElementById("advanceCount");
+    const advanceCount = advanceInput ? parseInt(advanceInput.value, 10) || 0 : 0;
+
+    const { data: existing } = await sb
+      .from("rounds")
+      .select("round_number")
+      .eq("event_id", eventId)
+      .order("round_number", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const nextNum = (existing?.round_number ?? 0) + 1;
+
+    const { data: round, error } = await sb
+      .from("rounds")
+      .insert({ event_id: eventId, round_number: nextNum, status: "active", advance_count: advanceCount })
+      .select().single();
+
+    if (error) { toast(error.message, false); return; }
+
+    await sb.from("race_state")
+      .update({ current_round_id: round.id, updated_at: new Date().toISOString() })
+      .eq("event_id", eventId);
+
+    await generateHeats(round.id);
+    toast(`Round ${nextNum} started!`);
+    await Promise.all([loadPage(), loadRoundMgmt()]);
+  }
+
+  async function generateHeats(roundId) {
+    const { data: cars } = await sb
+      .from("cars")
+      .select("id")
+      .eq("event_id", eventId)
+      .eq("eliminated", false);
+
+    if (!cars?.length) { toast("No eligible cars to race", false); return; }
+
+    const numL = event.num_lanes || 4;
+    const ids  = cars.map(c => c.id);
+
+    const heats = [];
+    for (let i = 0; i < ids.length; i += numL) {
+      heats.push(ids.slice(i, i + numL));
+    }
+
+    for (let hi = 0; hi < heats.length; hi++) {
+      const { data: heat } = await sb
+        .from("heats")
+        .insert({ event_id: eventId, round_id: roundId, heat_number: hi + 1, status: "pending" })
+        .select().single();
+
+      const entries = heats[hi].map((carId, li) => ({
+        event_id: eventId,
+        heat_id:  heat.id,
+        lane_number: li + 1,
+        car_id: carId,
+      }));
+      await sb.from("heat_entries").insert(entries);
+    }
+
+    const { data: firstHeat } = await sb
+      .from("heats")
+      .select("id")
+      .eq("round_id", roundId)
+      .eq("heat_number", 1)
+      .single();
+
+    if (firstHeat) {
+      await sb.from("heats").update({ status: "active" }).eq("id", firstHeat.id);
+      await sb.from("race_state")
+        .update({ current_heat_id: firstHeat.id, updated_at: new Date().toISOString() })
+        .eq("event_id", eventId);
+    }
+  }
+
+  async function closeRound(roundId) {
+    // Get round's advance_count
+    const { data: roundRow } = await sb
+      .from("rounds")
+      .select("advance_count, round_number")
+      .eq("id", roundId)
+      .single();
+
+    const advCount = roundRow?.advance_count ?? 0;
+
+    // If advance_count > 0, eliminate cars outside the top N
+    if (advCount > 0) {
+      const { data: standings } = await sb
+        .from("round_standings")
+        .select("car_id, standing")
+        .eq("event_id", eventId)
+        .order("standing");
+
+      if (standings?.length > advCount) {
+        const toEliminate = standings.slice(advCount).map(s => s.car_id);
+        if (toEliminate.length) {
+          await sb.from("cars").update({ eliminated: true }).in("id", toEliminate);
+        }
+      }
+    }
+
+    await sb.from("rounds").update({ status: "completed" }).eq("id", roundId);
+    await sb.from("race_state")
+      .update({ current_round_id: null, current_heat_id: null, updated_at: new Date().toISOString() })
+      .eq("event_id", eventId);
+
+    const msg = advCount > 0
+      ? `Round ${roundRow?.round_number} closed — top ${advCount} cars advance`
+      : `Round ${roundRow?.round_number} closed`;
+    toast(msg);
+    await Promise.all([loadPage(), loadRoundMgmt()]);
   }
 
   // ── Standings ────────────────────────────────────────────────
