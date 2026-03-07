@@ -37,9 +37,21 @@
 
     .fam-car { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 0; border-bottom:1px solid var(--border); }
     .fam-car:last-child { border-bottom:none; }
+    .fam-info { display:flex; flex-direction:column; gap:4px; flex:1; }
     .fam-num  { font-size:1.4rem; font-weight:900; color:var(--accent); }
     .fam-name { font-size:1rem; font-weight:600; }
-    .fam-actions { display:flex; gap:8px; flex-shrink:0; }
+    .fam-actions { display:flex; gap:8px; flex-shrink:0; align-items:center; }
+
+    .insp-toggle-btn {
+      width:44px; height:44px; border-radius:50%;
+      border:2px solid var(--border); background:transparent;
+      font-size:1.2rem; font-weight:900; cursor:pointer;
+      transition:all .15s; display:flex; align-items:center; justify-content:center;
+    }
+    .insp-toggle-btn.legal   { color:#4ade80; border-color:#4ade80; }
+    .insp-toggle-btn.illegal { color:#f87171; border-color:#f87171; }
+    .insp-toggle-btn.active.legal   { background:#4ade80; color:#000; }
+    .insp-toggle-btn.active.illegal { background:#f87171; color:#fff; }
   </style>
   <script src="/DerbySystem/config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
@@ -95,6 +107,18 @@
   </div>
 </div>
 
+<!-- Delete confirmation -->
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-box">
+    <h3>Delete Car?</h3>
+    <p id="confirmMsg">This cannot be undone.</p>
+    <div class="confirm-btns">
+      <button class="btn btn-ghost btn-full" onclick="closeConfirm()">Cancel</button>
+      <button class="btn btn-danger btn-full" id="confirmDeleteBtn">Delete</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
@@ -103,7 +127,7 @@
   let lastToken        = null;
   let lastScanAt       = 0;
   const DEBOUNCE       = 3000;
-  let currentFamilyCarIds = [];
+  let _pendingDeleteId = null;
 
   (async () => {
     ({ ctx, event, eventId } = await adminBoot());
@@ -113,7 +137,14 @@
 
     await loadTally();
     startScanner();
-    subscribeTable(eventId, "cars", loadTally);
+
+    // Live tally via realtime
+    sb.channel(`insp-cars-${eventId}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'cars', filter: `event_id=eq.${eventId}` }, payload => {
+        applyStatusUI(payload.new.id, payload.new.legal_status);
+        loadTally();
+      })
+      .subscribe();
   })();
 
   async function loadTally() {
@@ -208,40 +239,65 @@
     document.getElementById("tokenInput").value = "";
   }
 
+  function statusLabel(s) {
+    return s === 'legal' ? '✅ Legal' : s === 'not_legal' ? '❌ Not Legal' : '⏳ Pending';
+  }
+
   function showFamily(cars, token) {
-    currentFamilyCarIds = cars.map(c => c.id);
-    // Sort ascending by id so lower id is at top, higher id at bottom
-    cars = [...cars].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    // Sort by car_number numerically (lowest first)
+    cars = [...cars].sort((a, b) => (a.car_number ?? 0) - (b.car_number ?? 0));
     document.getElementById("familyTitle").textContent = `${cars.length} Car${cars.length > 1 ? "s" : ""}`;
-    document.getElementById("carList").innerHTML = cars.map(c => {
-      const statusColor = { legal: "var(--success)", not_legal: "var(--danger)", pending: "var(--muted2)" };
-      const statusLabel = { legal: "Legal ✓", not_legal: "Not Legal ✗", pending: "Pending" };
-      const legalDim    = c.legal_status === "not_legal" ? "opacity:0.3; pointer-events:none;" : "";
-      const illegalDim  = c.legal_status === "legal"     ? "opacity:0.3; pointer-events:none;" : "";
-      return `
-        <div class="fam-car">
-          <div style="flex:1; min-width:0;">
-            <div class="fam-num">#${c.car_number}</div>
-            <div class="fam-name">${c.kid_name}</div>
-            <div style="font-size:0.78rem; font-weight:700; color:${statusColor[c.legal_status]};">${statusLabel[c.legal_status]}</div>
-          </div>
-          <div class="fam-actions">
-            <button class="btn btn-sm" style="background:var(--success-bg); border:2px solid var(--success); color:var(--success); min-height:44px; ${legalDim}"
-                    onclick="setStatus('${c.id}', 'legal')">✓ Legal</button>
-            <button class="btn btn-sm" style="background:var(--danger-bg); border:2px solid var(--danger); color:var(--danger); min-height:44px; ${illegalDim}"
-                    onclick="setStatus('${c.id}', 'not_legal')">✗ Not Legal</button>
-          </div>
-        </div>`;
-    }).join("");
+    document.getElementById("carList").innerHTML = cars.map(c => `
+      <div class="fam-car" id="row_${c.id}">
+        <div class="fam-info">
+          <div class="fam-num">#${c.car_number}</div>
+          <div class="fam-name">${c.kid_name}</div>
+          <span class="badge badge-${c.legal_status}" id="badge_${c.id}">${statusLabel(c.legal_status)}</span>
+        </div>
+        <div class="fam-actions">
+          <button class="insp-toggle-btn legal ${c.legal_status === 'legal' ? 'active' : ''}"
+                  id="legal_${c.id}" onclick="setStatus('${c.id}', 'legal')">✓</button>
+          <button class="insp-toggle-btn illegal ${c.legal_status === 'not_legal' ? 'active' : ''}"
+                  id="illegal_${c.id}" onclick="setStatus('${c.id}', 'not_legal')">✗</button>
+          <button class="btn btn-ghost-danger btn-sm" style="min-height:40px; padding:0 10px; font-size:0.75rem;"
+                  onclick="askDelete('${c.id}', '#${c.car_number} ${c.kid_name}')">Del</button>
+        </div>
+      </div>`).join("");
 
     document.getElementById("familyOverlay").classList.add("open");
   }
 
-  async function refreshFamilySheet() {
-    if (!currentFamilyCarIds.length) return;
-    const { data: cars } = await sb.from("cars").select("*").in("id", currentFamilyCarIds);
-    if (cars?.length) showFamily(cars, null);
+  function applyStatusUI(carId, status) {
+    const badge = document.getElementById('badge_'   + carId);
+    const lBtn  = document.getElementById('legal_'   + carId);
+    const iBtn  = document.getElementById('illegal_' + carId);
+    if (badge) { badge.className = `badge badge-${status}`; badge.textContent = statusLabel(status); }
+    if (lBtn)  lBtn.classList.toggle('active', status === 'legal');
+    if (iBtn)  iBtn.classList.toggle('active', status === 'not_legal');
   }
+
+  function askDelete(carId, label) {
+    _pendingDeleteId = carId;
+    document.getElementById('confirmMsg').textContent = `Delete ${label}? This cannot be undone.`;
+    document.getElementById('confirmOverlay').classList.add('open');
+  }
+
+  function closeConfirm() {
+    _pendingDeleteId = null;
+    document.getElementById('confirmOverlay').classList.remove('open');
+  }
+
+  document.getElementById('confirmDeleteBtn').addEventListener('click', async () => {
+    if (!_pendingDeleteId) return;
+    const id = _pendingDeleteId;
+    closeConfirm();
+    const { error } = await sb.from('cars').delete().eq('id', id);
+    if (error) { toast('Delete failed: ' + error.message, false); return; }
+    const row = document.getElementById('row_' + id);
+    if (row) row.remove();
+    toast('Deleted.');
+    loadTally();
+  });
 
   function dismissFamily() {
     document.getElementById("familyOverlay").classList.remove("open");
@@ -249,16 +305,11 @@
   }
 
   async function setStatus(carId, status) {
-    const { error } = await sb.from("cars")
-      .update({ legal_status: status })
-      .eq("id", carId);
-
-    if (error) { toast(error.message, false); return; }
-
-    toast(status === "legal" ? "Marked Legal ✓" : "Marked Not Legal ✗", status === "legal");
-
-    await loadTally();
-    await refreshFamilySheet();
+    const { error } = await sb.from('cars').update({ legal_status: status }).eq('id', carId);
+    if (error) { toast('Update failed: ' + error.message, false); return; }
+    applyStatusUI(carId, status);
+    toast(status === 'legal' ? '✅ Legal' : '❌ Not Legal');
+    loadTally();
   }
 
   function toast(msg, ok = true) {

@@ -89,6 +89,37 @@
     <div id="standings"><span class="spinner"></span></div>
   </div>
 
+  <!-- ── Edit Past Results ────────────────────────────── -->
+  <div class="card">
+    <div class="card-title">Edit Past Results</div>
+    <div id="editResLock">
+      <p style="font-size:0.85rem; color:var(--muted2); margin-bottom:12px;">Officials-only. Enter the officials code to unlock.</p>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <input type="tel" id="editResPin" maxlength="4" placeholder="••••" autocomplete="off"
+               style="text-align:center;font-size:1.5rem;letter-spacing:8px;width:110px;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg);color:var(--text);" />
+        <button class="btn btn-primary" onclick="checkEditResPin()">Unlock</button>
+      </div>
+      <p id="editResPinErr" style="color:var(--danger);font-size:0.82rem;min-height:1.2em;margin-top:6px;"></p>
+    </div>
+    <div id="editResBody" style="display:none;">
+      <p style="font-size:0.85rem; color:var(--muted2); margin-bottom:12px;">Tap a completed heat to re-enter its results.</p>
+      <div id="editResList"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Edit Heat Results modal -->
+<div class="confirm-overlay" id="editHeatOverlay">
+  <div class="confirm-box" style="max-width:420px; width:100%;">
+    <h3 id="editHeatTitle" style="margin-bottom:16px;">Edit Heat</h3>
+    <div class="finish-grid" id="editHeatGrid"></div>
+    <p id="editHeatErr" style="color:var(--danger);font-size:0.82rem;min-height:1.2em;margin-top:8px;"></p>
+    <div class="confirm-btns" style="margin-top:12px;">
+      <button class="btn btn-ghost btn-full" onclick="document.getElementById('editHeatOverlay').classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary btn-full" id="saveEditHeatBtn" onclick="saveEditHeat()">Save</button>
+    </div>
+  </div>
 </div>
 
 <!-- Re-race confirm -->
@@ -125,6 +156,8 @@
     subscribeTable(eventId, "race_state",   () => { loadPage(); loadRoundMgmt(); });
     subscribeTable(eventId, "heat_results", loadPage);
     subscribeTable(eventId, "rounds",       () => { loadStandings(); loadRoundMgmt(); });
+    subscribeTable(eventId, "heats",        loadRoundMgmt);
+    initEditSection();
   })();
 
   function setMode(mode) {
@@ -212,6 +245,10 @@
     }
 
     await loadStandings();
+    // Refresh edit list if section is unlocked
+    if (document.getElementById('editResBody')?.style.display !== 'none') {
+      loadEditResList();
+    }
   }
 
   // ── Quick tap ────────────────────────────────────────────────
@@ -376,6 +413,31 @@
 
     let html = "";
     if (rounds?.length) {
+      // Load heat progress for active round
+      let heatStats = "";
+      if (activeRound) {
+        const { data: heats } = await sb.from("heats")
+          .select("id, heat_number, status")
+          .eq("round_id", activeRound.id)
+          .order("heat_number");
+        const total     = heats?.length ?? 0;
+        const completed = heats?.filter(h => h.status === "completed").length ?? 0;
+        const active    = heats?.find(h => h.status === "active");
+        heatStats = `
+          <div style="margin:12px 0; display:flex; gap:20px; flex-wrap:wrap;">
+            <div><span style="font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:1px;">Heats done</span><br/>
+              <strong style="font-size:1.3rem;">${completed}/${total}</strong></div>
+            <div><span style="font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:1px;">Current heat</span><br/>
+              <strong style="font-size:1.3rem; color:var(--accent2);">${active ? `Heat ${active.heat_number}` : (completed === total && total > 0 ? 'All done' : '—')}</strong></div>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:12px;">
+            ${(heats || []).map(h => {
+              const color = h.status === 'completed' ? 'var(--success)' : h.status === 'active' ? 'var(--accent2)' : 'var(--border2)';
+              return `<div title="Heat ${h.heat_number}" style="width:18px; height:8px; border-radius:4px; background:${color};"></div>`;
+            }).join('')}
+          </div>`;
+      }
+
       html += rounds.map(r => {
         const badge = r.status === "active"
           ? `<span class="badge badge-active">Active</span>`
@@ -389,7 +451,8 @@
           <div style="flex:1; font-weight:700;">Round ${r.round_number} ${advLabel}</div>
           ${badge}
           ${r.status === "active" ? `<button class="btn btn-ghost btn-sm" onclick="closeRound('${r.id}')">Close Round</button>` : ""}
-        </div>`;
+        </div>
+        ${r.status === "active" ? heatStats : ''}`;
       }).join("");
     } else {
       html = `<div class="empty-state" style="margin-bottom:4px;">No rounds yet — start one to begin the race.</div>`;
@@ -448,24 +511,51 @@
 
     if (!cars?.length) { toast("No eligible cars to race", false); return; }
 
-    const numL = event.num_lanes || 4;
     const ids  = cars.map(c => c.id);
+    const numL = event.num_lanes || 4;
 
-    const heats = [];
-    for (let i = 0; i < ids.length; i += numL) {
-      heats.push(ids.slice(i, i + numL));
+    // Lane-stride schedule: each car races exactly once per lane
+    function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
+    function shuffle(arr) {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+    function findBestStep(n) {
+      const target = n / 4;
+      let best = null;
+      for (let s = 1; s < n; s++) {
+        let ok = true;
+        for (let k = 1; k < 4; k++) { if ((k * s) % n === 0) { ok = false; break; } }
+        if (!ok) continue;
+        const g = gcd(s, n);
+        const dist = Math.abs(s - target);
+        if (!best || g < best.g || (g === best.g && dist < best.dist)) best = { s, g, dist };
+      }
+      return best ? best.s : 1;
     }
 
-    for (let hi = 0; hi < heats.length; hi++) {
+    const shuffled = shuffle(ids);
+    const n = shuffled.length;
+    const s = n >= 4 ? findBestStep(n) : 1;
+
+    const schedule = Array.from({ length: n }, (_, h) =>
+      [0, 1, 2, 3].slice(0, numL).map(k => ({ lane: k + 1, carId: shuffled[(h + k * s) % n] }))
+    );
+
+    for (let hi = 0; hi < schedule.length; hi++) {
       const { data: heat } = await sb
         .from("heats")
         .insert({ event_id: eventId, round_id: roundId, heat_number: hi + 1, status: "pending" })
         .select().single();
 
-      const entries = heats[hi].map((carId, li) => ({
+      const entries = schedule[hi].map(({ lane, carId }) => ({
         event_id: eventId,
         heat_id:  heat.id,
-        lane_number: li + 1,
+        lane_number: lane,
         car_id: carId,
       }));
       await sb.from("heat_entries").insert(entries);
@@ -522,6 +612,106 @@
       : `Round ${roundRow?.round_number} closed`;
     toast(msg);
     await Promise.all([loadPage(), loadRoundMgmt()]);
+  }
+
+  // ── Edit Past Results ───────────────────────────────────
+  const EDIT_PIN = '1357';
+  let _editHeatId      = null;
+  let _editHeatEntries = [];
+
+  function checkEditResPin() {
+    const input = document.getElementById('editResPin');
+    if (input.value === EDIT_PIN) {
+      sessionStorage.setItem('derby_edit_pin_' + eventId, EDIT_PIN);
+      document.getElementById('editResLock').style.display = 'none';
+      document.getElementById('editResBody').style.display = 'block';
+      loadEditResList();
+    } else {
+      document.getElementById('editResPinErr').textContent = 'Wrong code';
+      input.value = '';
+    }
+  }
+
+  function initEditSection() {
+    if (sessionStorage.getItem('derby_edit_pin_' + eventId) === EDIT_PIN) {
+      document.getElementById('editResLock').style.display = 'none';
+      document.getElementById('editResBody').style.display = 'block';
+      loadEditResList();
+    }
+  }
+
+  async function loadEditResList() {
+    const el = document.getElementById('editResList');
+    if (!currentRoundId) { el.innerHTML = '<div class="empty-state">No active round.</div>'; return; }
+    const { data: heats } = await sb.from('heats')
+      .select('id, heat_number')
+      .eq('round_id', currentRoundId)
+      .eq('status', 'completed')
+      .order('heat_number');
+    if (!heats?.length) { el.innerHTML = '<div class="empty-state">No completed heats yet.</div>'; return; }
+    el.innerHTML = heats.map(h => `
+      <div class="leaderboard-row" style="cursor:pointer;" onclick="openEditHeat('${h.id}', ${h.heat_number})">
+        <div class="rank">H${h.heat_number}</div>
+        <div class="name">Heat ${h.heat_number}</div>
+        <div class="pts">Edit &rarr;</div>
+      </div>`).join('');
+  }
+
+  async function openEditHeat(heatId, heatNumber) {
+    _editHeatId = heatId;
+    document.getElementById('editHeatErr').textContent = '';
+    const [{ data: entries }, { data: result }] = await Promise.all([
+      sb.from('heat_entries').select('lane_number, car_id, cars(car_number, kid_name)').eq('heat_id', heatId).order('lane_number'),
+      sb.from('heat_results').select('*').eq('heat_id', heatId).maybeSingle()
+    ]);
+    _editHeatEntries = (entries || []).map(e => ({
+      lane_number: e.lane_number, car_id: e.car_id,
+      car_number: e.cars?.car_number, kid_name: e.cars?.kid_name
+    }));
+    const posMap = {};
+    if (result) {
+      posMap[result.first_place_car]  = 1; posMap[result.second_place_car] = 2;
+      posMap[result.third_place_car]  = 3; posMap[result.fourth_place_car] = 4;
+    }
+    const positions = ['1st','2nd','3rd','4th'];
+    document.getElementById('editHeatTitle').textContent = `Edit Heat ${heatNumber}`;
+    document.getElementById('editHeatGrid').innerHTML = _editHeatEntries.map(e => `
+      <div class="finish-lane">
+        <div class="lane-heading">Lane ${e.lane_number}</div>
+        <div class="car-badge">#${e.car_number}</div>
+        <div style="font-size:0.85rem; color:var(--muted); margin:4px 0 8px;">${e.kid_name}</div>
+        <select id="editpos_${e.car_id}">
+          <option value="">--</option>
+          ${positions.map((p, i) => `<option value="${i+1}" ${posMap[e.car_id] === i+1 ? 'selected' : ''}>${p}</option>`).join('')}
+        </select>
+      </div>`).join('');
+    document.getElementById('editHeatOverlay').classList.add('open');
+  }
+
+  async function saveEditHeat() {
+    const posMap = {};
+    for (const e of _editHeatEntries) {
+      const val = parseInt(document.getElementById('editpos_' + e.car_id)?.value);
+      if (!val) { document.getElementById('editHeatErr').textContent = 'Set a position for every car.'; return; }
+      if (posMap[val]) { document.getElementById('editHeatErr').textContent = "Two cars can't share a position!"; return; }
+      posMap[val] = e.car_id;
+    }
+    const btn = document.getElementById('saveEditHeatBtn');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      await sb.from('heat_results').delete().eq('heat_id', _editHeatId);
+      const { error } = await sb.from('heat_results').insert({
+        event_id: eventId, heat_id: _editHeatId,
+        first_place_car:  posMap[1], second_place_car: posMap[2],
+        third_place_car:  posMap[3], fourth_place_car: posMap[4]
+      });
+      if (error) throw error;
+      toast('Results updated!');
+      document.getElementById('editHeatOverlay').classList.remove('open');
+      await Promise.all([loadPage(), loadEditResList()]);
+    } catch(err) {
+      document.getElementById('editHeatErr').textContent = 'Save failed: ' + err.message;
+    } finally { btn.disabled = false; btn.textContent = 'Save'; }
   }
 
   // ── Standings ────────────────────────────────────────────────
